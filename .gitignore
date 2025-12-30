@@ -11,3 +11,8 @@ DerivedData/
 # will have compiled files and executables
 debug
 target
+
+# Local build artifacts
+Binaries/
+Sources/PicoHarmonyGenerated/
+rust/harmony_uniffi/build/
