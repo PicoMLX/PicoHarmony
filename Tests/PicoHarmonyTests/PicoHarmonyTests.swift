@@ -18,16 +18,26 @@ private func readTokens(_ filename: String) throws -> [UInt32] {
   return contents.split { $0.isWhitespace }.compactMap { UInt32($0) }
 }
 
-private func encodeMessages(_ messages: [Message]) throws -> String {
-  let encoder = JSONEncoder()
-  encoder.keyEncodingStrategy = .convertToSnakeCase
-  let data = try encoder.encode(messages)
-  return String(decoding: data, as: UTF8.self)
-}
-
 private func readText(_ filename: String) throws -> String {
   let url = testDataRoot.appendingPathComponent(filename)
   return try String(contentsOf: url, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private func assertMessage(_ actual: Message, equals expected: Message) {
+  #expect(actual.author.role == expected.author.role, "author.role")
+  #expect(actual.author.name == expected.author.name, "author.name")
+  #expect(actual.channel == expected.channel, "channel")
+  #expect(actual.recipient == expected.recipient, "recipient")
+  #expect(actual.contentType == expected.contentType, "contentType")
+  #expect(actual.content.count == expected.content.count, "content count")
+  for (idx, (a, e)) in zip(actual.content, expected.content).enumerated() {
+    switch (a, e) {
+    case let (.text(at), .text(et)):
+      #expect(at.text == et.text, "content[\(idx)] text")
+    default:
+      #expect(Bool(false), "content[\(idx)] kind mismatch: \(a) vs \(e)")
+    }
+  }
 }
 
 @Suite struct HarmonyEncodingTests {
@@ -50,26 +60,39 @@ private func readText(_ filename: String) throws -> String {
   @Test func simpleReasoningResponseParsesAndRoundTrips() throws {
     let tokens = try readTokens("test_simple_reasoning_response.txt")
     let messages = try enc.parseMessagesFromCompletionTokens(tokens, role: .assistant)
-    #expect(messages.count == 2)
-    let firstText = (messages[0].content.first).flatMap { if case let .text(t) = $0 { t.text } else { nil } }
-    let secondText = (messages[1].content.first).flatMap { if case let .text(t) = $0 { t.text } else { nil } }
-    #expect(messages[0].channel == "analysis")
-    #expect(messages[1].channel == "final")
-    #expect(firstText == "User asks: \"What is 2 + 2?\" Simple arithmetic. Provide answer.")
-    #expect(secondText == "2 + 2 = 4.")
+    let expected = [
+      Message(author: Author(role: .assistant),
+              content: [.text(TextContent("User asks: \"What is 2 + 2?\" Simple arithmetic. Provide answer."))],
+              channel: "analysis",
+              recipient: nil,
+              contentType: nil),
+      Message(author: Author(role: .assistant),
+              content: [.text(TextContent("2 + 2 = 4."))],
+              channel: "final",
+              recipient: nil,
+              contentType: nil),
+    ]
+    #expect(messages.count == expected.count)
+    zip(messages, expected).forEach { assertMessage($0.0, equals: $0.1) }
   }
 
   @Test func simpleToolCallParsesAndRoundTrips() throws {
     let tokens = try readTokens("test_simple_tool_call.txt")
     let messages = try enc.parseMessagesFromCompletionTokens(tokens, role: .assistant)
-    #expect(messages.count == 2)
-    let firstText = (messages[0].content.first).flatMap { if case let .text(t) = $0 { t.text } else { nil } }
-    let secondText = (messages[1].content.first).flatMap { if case let .text(t) = $0 { t.text } else { nil } }
-    #expect(messages[0].channel == "analysis")
-    #expect(messages[1].channel == "analysis")
-    #expect(messages[1].recipient == "lookup_weather")
-    #expect(firstText == "User asks: \"What is the weather in Tokyo?\" We need to use lookup_weather tool.")
-    #expect(secondText == "{\"location\": \"Tokyo\"}")
+    let expected = [
+      Message(author: Author(role: .assistant),
+              content: [.text(TextContent("User asks: \"What is the weather in Tokyo?\" We need to use lookup_weather tool."))],
+              channel: "analysis",
+              recipient: nil,
+              contentType: nil),
+      Message(author: Author(role: .assistant),
+              content: [.text(TextContent("{\"location\": \"Tokyo\"}"))],
+              channel: "analysis",
+              recipient: "lookup_weather",
+              contentType: "code"),
+    ]
+    #expect(messages.count == expected.count)
+    zip(messages, expected).forEach { assertMessage($0.0, equals: $0.1) }
   }
 
   @Test func reasoningSystemMessageRenders() throws {
@@ -119,8 +142,15 @@ private func readText(_ filename: String) throws -> String {
     #expect(try enc.encode("hello world") == [24912, 2375])
     #expect(try enc.encode("<|start|>", policy: .allow(["<|start|>" ])) == [200006])
     #expect(try enc.encode("<|start|>", policy: .allowAll) == [200006])
-    #expect(throws: HarmonyError.self) { _ = try enc.encode("<|start|>") }
-    #expect(try enc.encode("<|start|>", policy: .disableChecks).count > 0)
+    do {
+      _ = try enc.encode("<|start|>")
+      Issue.record("Expected disallowed special token to throw")
+    } catch let err as HarmonyError {
+      if case .Msg(let msg) = err {
+        #expect(msg.contains("Encountered disallowed special token"))
+      } else { Issue.record("Unexpected error case: \(err)") }
+    }
+    #expect(try enc.encode("<|start|>", policy: .disableChecks) == [27, 91, 5236, 91, 29])
   }
 
   @Test func isSpecialToken() throws {
@@ -134,7 +164,27 @@ private func readText(_ filename: String) throws -> String {
   }
 
   @Test func invalidUtf8Decoding() throws {
-    #expect(throws: HarmonyError.self) { _ = try enc.decodeUtf8([99999999]) }
+    do {
+      _ = try enc.decodeUtf8([99999999])
+      Issue.record("Expected invalid token decode to throw")
+    } catch let err as HarmonyError {
+      if case .Msg(let msg) = err {
+        #expect(msg.contains("Invalid token for decoding: 99999999"))
+      } else { Issue.record("Unexpected error case: \(err)") }
+    }
+
+    let invalidBytes = [UInt32(132990), UInt32(9552)]
+    do {
+      _ = try enc.decodeUtf8(invalidBytes)
+      Issue.record("Expected invalid utf-8 to throw")
+    } catch let err as HarmonyError {
+      if case .Msg(let msg) = err {
+        #expect(msg.contains("Invalid utf-8"))
+      } else { Issue.record("Unexpected error case: \(err)") }
+    }
+
+    let replaced = try enc.decode(invalidBytes, errors: .replace)
+    #expect(replaced.contains("Chicken"))
   }
 
   @Test func streamableParserSimple() async throws {

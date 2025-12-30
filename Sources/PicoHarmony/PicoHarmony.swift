@@ -290,7 +290,9 @@ public final class HarmonyEncoding: @unchecked Sendable {
     let json = try inner.parseMessagesFromCompletionTokens(tokens: tokens,
                                                            role: role?.rawValue,
                                                            strict: strict)
-    return try decoder.decode([Message].self, from: Data(json.utf8))
+    let msgDecoder = JSONDecoder()
+    msgDecoder.keyDecodingStrategy = .useDefaultKeys
+    return try msgDecoder.decode([Message].self, from: Data(json.utf8))
   }
 
   public func decodeUtf8(_ tokens: [UInt32]) throws -> String {
