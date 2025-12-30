@@ -11,18 +11,18 @@ let package = Package(
   ],
   targets: [
     .binaryTarget(
-      name: "HarmonyFFI",
-      path: "Binaries/HarmonyFFI.xcframework"
+      name: "harmony_uniffiFFI",
+      path: "Binaries/harmony_uniffiFFI.xcframework"
     ),
     .target(
       name: "HarmonyUniFFI",
-      dependencies: ["HarmonyFFI"],
-      path: "SourcesGenerated/HarmonyUniFFI"
+      dependencies: ["harmony_uniffiFFI"],
+      path: "rust/harmony_uniffi/Sources/PicoHarmonyGenerated"
     ),
     .target(
       name: "Harmony",
       dependencies: ["HarmonyUniFFI"],
-      path: "Sources/Harmony"
+      path: "Sources/PicoHarmony"
     ),
   ]
 )

@@ -9,7 +9,7 @@ RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}"
 rustup toolchain install "$RUSTUP_TOOLCHAIN" >/dev/null 2>&1 || true
 
 CRATE="rust/harmony_uniffi"
-OUT_XC="Binaries/PicoHarmonyFFI.xcframework"
+OUT_XC="Binaries/harmony_uniffiFFI.xcframework"
 OUT_SWIFT="Sources/PicoHarmonyGenerated"
 
 LIB_NAME="libharmony_uniffi.a"
@@ -54,6 +54,23 @@ rustup run "$RUSTUP_TOOLCHAIN" cargo run --release --bin uniffi-bindgen-swift --
 cp -R build/uniffi/Headers/* build/xc_headers/Headers/
 cp -R build/uniffi/Modules/* build/xc_headers/Modules/
 
+# Ensure the modulemap matches the expected Swift import module name and is suitable for static libs
+MODULEMAP_PATH="build/xc_headers/Modules/module.modulemap"
+if [ -f "$MODULEMAP_PATH" ]; then
+  cat > "$MODULEMAP_PATH" <<'EOF'
+module harmony_uniffiFFI {
+  header "harmony_uniffiFFI.h"
+  export *
+}
+EOF
+fi
+
+# Flatten headers/modules into a single directory for xcodebuild
+rm -rf build/xc_headers_flat
+mkdir -p build/xc_headers_flat
+cp build/xc_headers/Headers/* build/xc_headers_flat/
+cp "$MODULEMAP_PATH" build/xc_headers_flat/
+
 # 3) Build libs for each target
 rustup run "$RUSTUP_TOOLCHAIN" cargo build --release --target aarch64-apple-ios
 rustup run "$RUSTUP_TOOLCHAIN" cargo build --release --target aarch64-apple-ios-sim
@@ -81,9 +98,9 @@ popd >/dev/null
 # 5) Create XCFramework with iOS + iOS-sim + macOS
 rm -rf "$OUT_XC"
 xcodebuild -create-xcframework \
-  -library "$CRATE/$IOS_LIB" -headers "$CRATE/build/xc_headers" \
-  -library "$CRATE/$SIM_FAT_LIB" -headers "$CRATE/build/xc_headers" \
-  -library "$CRATE/$MAC_FAT_LIB" -headers "$CRATE/build/xc_headers" \
+  -library "$CRATE/$IOS_LIB" -headers "$CRATE/build/xc_headers_flat" \
+  -library "$CRATE/$SIM_FAT_LIB" -headers "$CRATE/build/xc_headers_flat" \
+  -library "$CRATE/$MAC_FAT_LIB" -headers "$CRATE/build/xc_headers_flat" \
   -output "$OUT_XC"
 
 echo "✅ Generated:"
