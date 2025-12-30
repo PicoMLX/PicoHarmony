@@ -24,5 +24,10 @@ let package = Package(
       dependencies: ["HarmonyUniFFI"],
       path: "Sources/PicoHarmony"
     ),
+    .testTarget(
+      name: "PicoHarmonyTests",
+      dependencies: ["Harmony"],
+      path: "Tests/PicoHarmonyTests"
+    ),
   ]
 )
