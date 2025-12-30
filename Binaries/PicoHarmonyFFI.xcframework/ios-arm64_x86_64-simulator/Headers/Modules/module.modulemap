@@ -1,0 +1,7 @@
+framework module harmony_uniffi {
+    header "harmony_uniffiFFI.h"
+    export *
+    use "Darwin"
+    use "_Builtin_stdbool"
+    use "_Builtin_stdint"
+}
