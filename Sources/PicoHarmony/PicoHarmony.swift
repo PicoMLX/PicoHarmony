@@ -481,6 +481,9 @@ public struct HarmonyEncoding: Sendable {
   private static func makeEncoder() -> JSONEncoder {
     let enc = JSONEncoder()
     enc.keyEncodingStrategy = .convertToSnakeCase
+    // The Rust renderer may preserve map insertion order when emitting tool schemas.
+    // Using sorted keys ensures stable output that matches fixtures.
+    enc.outputFormatting = [.sortedKeys]
     return enc
   }
 
