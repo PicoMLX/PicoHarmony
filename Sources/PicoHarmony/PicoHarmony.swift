@@ -11,6 +11,43 @@ public enum Role: String, Codable, Sendable {
   case user, assistant, system, developer, tool
 }
 
+// MARK: - Common stringly-typed fields (Swifty wrappers)
+
+/// A message "channel" such as "analysis", "commentary", or "final".
+///
+/// Modeled as an open set (not a closed enum) so callers can use custom channels
+/// without losing type-safety at the API surface.
+public struct Channel: RawRepresentable, Codable, Hashable, Sendable, ExpressibleByStringLiteral {
+  public var rawValue: String
+
+  public init(rawValue: String) { self.rawValue = rawValue }
+  public init(stringLiteral value: String) { self.rawValue = value }
+
+  public static let analysis: Channel = "analysis"
+  public static let commentary: Channel = "commentary"
+  public static let final: Channel = "final"
+}
+
+/// A message content type (e.g., "text"), modeled as an open set.
+public struct ContentType: RawRepresentable, Codable, Hashable, Sendable, ExpressibleByStringLiteral {
+  public var rawValue: String
+
+  public init(rawValue: String) { self.rawValue = rawValue }
+  public init(stringLiteral value: String) { self.rawValue = value }
+
+  public static let text: ContentType = "text"
+  public static let systemContent: ContentType = "system_content"
+  public static let developerContent: ContentType = "developer_content"
+}
+
+/// A recipient identifier (often a tool / namespace) modeled as an open set.
+public struct Recipient: RawRepresentable, Codable, Hashable, Sendable, ExpressibleByStringLiteral {
+  public var rawValue: String
+
+  public init(rawValue: String) { self.rawValue = rawValue }
+  public init(stringLiteral value: String) { self.rawValue = value }
+}
+
 public struct Author: Codable, Sendable {
   public var role: Role
   public var name: String?
@@ -21,9 +58,13 @@ public struct Author: Codable, Sendable {
   }
 }
 
-public struct TextContent: Codable, Sendable {
+public struct TextContent: Codable, Sendable, ExpressibleByStringLiteral {
   public var text: String
   public init(_ text: String) { self.text = text }
+
+  public init(stringLiteral value: String) {
+    self.text = value
+  }
 }
 
 public struct ToolDescription: Codable, Sendable {
@@ -108,22 +149,26 @@ public enum Content: Codable, Sendable {
   case system(SystemContent)
   case developer(DeveloperContent)
 
+  // MARK: - Convenience
+  /// Allows `.text(myString)` when `myString` is a `String` (not just a string literal).
+  public static func text(_ value: String) -> Content { .text(TextContent(value)) }
+
   private enum CodingKeys: String, CodingKey { case type, text }
-  private enum ContentType: String { case text = "text", system = "system_content", developer = "developer_content" }
 
   public init(from decoder: Decoder) throws {
     let container = try decoder.container(keyedBy: CodingKeys.self)
     let type = try container.decode(String.self, forKey: .type)
-    switch ContentType(rawValue: type) {
-    case .text:
+    switch type {
+    case ContentType.text.rawValue:
       let text = try container.decode(String.self, forKey: .text)
       self = .text(TextContent(text))
-    case .system:
+    case ContentType.systemContent.rawValue:
       self = .system(try SystemContent(from: decoder))
-    case .developer:
+    case ContentType.developerContent.rawValue:
       self = .developer(try DeveloperContent(from: decoder))
-    case .none:
-      throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown content type \(type)"))
+    default:
+      throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                                             debugDescription: "Unknown content type \(type)"))
     }
   }
 
@@ -134,10 +179,10 @@ public enum Content: Codable, Sendable {
       try container.encode(ContentType.text.rawValue, forKey: .type)
       try container.encode(t.text, forKey: .text)
     case .system(let sys):
-      try container.encode(ContentType.system.rawValue, forKey: .type)
+      try container.encode(ContentType.systemContent.rawValue, forKey: .type)
       try sys.encode(to: encoder)
     case .developer(let dev):
-      try container.encode(ContentType.developer.rawValue, forKey: .type)
+      try container.encode(ContentType.developerContent.rawValue, forKey: .type)
       try dev.encode(to: encoder)
     }
   }
@@ -146,15 +191,15 @@ public enum Content: Codable, Sendable {
 public struct Message: Codable, Sendable {
   public var author: Author
   public var content: [Content]
-  public var channel: String?
-  public var recipient: String?
-  public var contentType: String?
+  public var channel: Channel?
+  public var recipient: Recipient?
+  public var contentType: ContentType?
 
   public init(author: Author,
               content: [Content],
-              channel: String? = nil,
-              recipient: String? = nil,
-              contentType: String? = nil) {
+              channel: Channel? = nil,
+              recipient: Recipient? = nil,
+              contentType: ContentType? = nil) {
     self.author = author
     self.content = content
     self.channel = channel
@@ -162,12 +207,45 @@ public struct Message: Codable, Sendable {
     self.contentType = contentType
   }
 
-  public static func user(_ text: String) -> Message {
-    Message(author: Author(role: .user), content: [.text(TextContent(text))])
+  // MARK: - Factories
+  public static func user(_ text: String,
+                          name: String? = nil,
+                          channel: Channel? = nil,
+                          recipient: Recipient? = nil,
+                          contentType: ContentType? = nil) -> Message {
+    Message(author: Author(role: .user, name: name),
+            content: [.text(text)],
+            channel: channel,
+            recipient: recipient,
+            contentType: contentType)
   }
 
-  public static func assistant(_ text: String) -> Message {
-    Message(author: Author(role: .assistant), content: [.text(TextContent(text))])
+  public static func assistant(_ text: String,
+                               name: String? = nil,
+                               channel: Channel? = nil,
+                               recipient: Recipient? = nil,
+                               contentType: ContentType? = nil) -> Message {
+    Message(author: Author(role: .assistant, name: name),
+            content: [.text(text)],
+            channel: channel,
+            recipient: recipient,
+            contentType: contentType)
+  }
+
+  public static func system(_ content: SystemContent,
+                            channel: Channel? = nil) -> Message {
+    Message(author: Author(role: .system),
+            content: [.system(content)],
+            channel: channel,
+            contentType: .systemContent)
+  }
+
+  public static func developer(_ content: DeveloperContent,
+                               channel: Channel? = nil) -> Message {
+    Message(author: Author(role: .developer),
+            content: [.developer(content)],
+            channel: channel,
+            contentType: .developerContent)
   }
 
   private enum CodingKeys: String, CodingKey { case role, name, content, channel, recipient, contentType = "content_type" }
@@ -184,9 +262,23 @@ public struct Message: Codable, Sendable {
     }
 
     self.author = Author(role: role, name: name)
-    self.channel = try container.decodeIfPresent(String.self, forKey: .channel)
-    self.recipient = try container.decodeIfPresent(String.self, forKey: .recipient)
-    self.contentType = try container.decodeIfPresent(String.self, forKey: .contentType)
+    if let ch = try container.decodeIfPresent(String.self, forKey: .channel) {
+      self.channel = Channel(rawValue: ch)
+    } else {
+      self.channel = nil
+    }
+
+    if let r = try container.decodeIfPresent(String.self, forKey: .recipient) {
+      self.recipient = Recipient(rawValue: r)
+    } else {
+      self.recipient = nil
+    }
+
+    if let ct = try container.decodeIfPresent(String.self, forKey: .contentType) {
+      self.contentType = ContentType(rawValue: ct)
+    } else {
+      self.contentType = nil
+    }
   }
 
   public func encode(to encoder: Encoder) throws {
@@ -194,9 +286,9 @@ public struct Message: Codable, Sendable {
     try container.encode(author.role, forKey: .role)
     try container.encodeIfPresent(author.name, forKey: .name)
     try container.encode(content, forKey: .content)
-    try container.encodeIfPresent(channel, forKey: .channel)
-    try container.encodeIfPresent(recipient, forKey: .recipient)
-    try container.encodeIfPresent(contentType, forKey: .contentType)
+    try container.encodeIfPresent(channel?.rawValue, forKey: .channel)
+    try container.encodeIfPresent(recipient?.rawValue, forKey: .recipient)
+    try container.encodeIfPresent(contentType?.rawValue, forKey: .contentType)
   }
 }
 
@@ -206,6 +298,12 @@ public struct Conversation: Codable, Sendable {
 }
 
 // MARK: - Render/parse options
+
+public enum RenderPurpose: Sendable {
+  case raw
+  case completion(nextTurnRole: Role)
+  case training
+}
 
 public struct RenderConversationConfig: Sendable, Codable {
   public var autoDropAnalysis: Bool = true
@@ -236,45 +334,63 @@ public enum DecodeErrorMode: String, Sendable {
 
 // MARK: - HarmonyEncoding wrapper
 
-public final class HarmonyEncoding: @unchecked Sendable {
+// NOTE: Intentionally **not** `Sendable`.
+// `JSONEncoder` / `JSONDecoder` are reference types and not guaranteed thread-safe.
+// If you need to share an encoder across tasks, wrap it in an `actor` or create one per task.
+public final class HarmonyEncoding {
   private let inner: HarmonyEncodingFfi
   private let encoder: JSONEncoder
   private let decoder: JSONDecoder
+  private let completionDecoder: JSONDecoder
+  private let cachedSpecialTokens: Set<String>
 
   public init(name: HarmonyEncodingName = .harmonyGptOss) throws {
     self.inner = try HarmonyEncodingFfi(name: name.rawValue)
     self.encoder = HarmonyEncoding.makeEncoder()
     self.decoder = HarmonyEncoding.makeDecoder()
+    self.completionDecoder = HarmonyEncoding.makeCompletionDecoder()
+    self.cachedSpecialTokens = Set(inner.specialTokens())
   }
 
   public var name: String { inner.name() }
 
   public var specialTokens: Set<String> {
-    Set(inner.specialTokens())
+    cachedSpecialTokens
   }
 
+  public func renderConversation(_ conversation: Conversation,
+                                 purpose: RenderPurpose = .raw,
+                                 config: RenderConversationConfig = .init()) throws -> [UInt32] {
+    let json = try encodeConversation(conversation)
+    let cfg = RenderConversationConfigFfi(autoDropAnalysis: config.autoDropAnalysis)
+
+    switch purpose {
+    case .raw:
+      return try inner.renderConversation(conversationJson: json, config: cfg)
+    case .training:
+      return try inner.renderConversationForTraining(conversationJson: json, config: cfg)
+    case .completion(let nextTurnRole):
+      return try inner.renderConversationForCompletion(conversationJson: json,
+                                                       nextTurnRole: nextTurnRole.rawValue,
+                                                       config: cfg)
+    }
+  }
+
+  // Backwards-compatible wrappers
   public func renderConversationForCompletion(_ conversation: Conversation,
                                               nextTurnRole: Role,
                                               config: RenderConversationConfig = .init()) throws -> [UInt32] {
-    let json = try encodeConversation(conversation)
-    let cfg = RenderConversationConfigFfi(autoDropAnalysis: config.autoDropAnalysis)
-    return try inner.renderConversationForCompletion(conversationJson: json,
-                                                     nextTurnRole: nextTurnRole.rawValue,
-                                                     config: cfg)
+    try renderConversation(conversation, purpose: .completion(nextTurnRole: nextTurnRole), config: config)
   }
 
   public func renderConversation(_ conversation: Conversation,
                                  config: RenderConversationConfig = .init()) throws -> [UInt32] {
-    let json = try encodeConversation(conversation)
-    let cfg = RenderConversationConfigFfi(autoDropAnalysis: config.autoDropAnalysis)
-    return try inner.renderConversation(conversationJson: json, config: cfg)
+    try renderConversation(conversation, purpose: .raw, config: config)
   }
 
   public func renderConversationForTraining(_ conversation: Conversation,
                                             config: RenderConversationConfig = .init()) throws -> [UInt32] {
-    let json = try encodeConversation(conversation)
-    let cfg = RenderConversationConfigFfi(autoDropAnalysis: config.autoDropAnalysis)
-    return try inner.renderConversationForTraining(conversationJson: json, config: cfg)
+    try renderConversation(conversation, purpose: .training, config: config)
   }
 
   public func render(_ message: Message,
@@ -290,9 +406,7 @@ public final class HarmonyEncoding: @unchecked Sendable {
     let json = try inner.parseMessagesFromCompletionTokens(tokens: tokens,
                                                            role: role?.rawValue,
                                                            strict: strict)
-    let msgDecoder = JSONDecoder()
-    msgDecoder.keyDecodingStrategy = .useDefaultKeys
-    return try msgDecoder.decode([Message].self, from: Data(json.utf8))
+    return try completionDecoder.decode([Message].self, from: Data(json.utf8))
   }
 
   public func decodeUtf8(_ tokens: [UInt32]) throws -> String {
@@ -327,12 +441,10 @@ public final class HarmonyEncoding: @unchecked Sendable {
     }
 
     if !disallowed.isEmpty {
-      let pattern = disallowed.map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
-      if let regex = try? NSRegularExpression(pattern: "(\(pattern))") {
-        let range = NSRange(location: 0, length: text.utf16.count)
-        if let match = regex.firstMatch(in: text, range: range) {
-          let matched = (text as NSString).substring(with: match.range)
-          throw HarmonyError.Msg("Encountered disallowed special token: \(matched)")
+      // Deterministic iteration keeps errors reproducible across runs.
+      for tok in disallowed.sorted() {
+        if text.contains(tok) {
+          throw HarmonyError.Msg("Encountered disallowed special token: \(tok)")
         }
       }
     }
@@ -378,23 +490,39 @@ public final class HarmonyEncoding: @unchecked Sendable {
     dec.keyDecodingStrategy = .convertFromSnakeCase
     return dec
   }
+
+  private static func makeCompletionDecoder() -> JSONDecoder {
+    let dec = JSONDecoder()
+    dec.keyDecodingStrategy = .useDefaultKeys
+    return dec
+  }
 }
 
 // MARK: - Streamable parser (actor for safety)
 
 public struct StreamDelta: Sendable {
-  public var channel: String?
-  public var delta: String?
-  public var contentType: String?
-  public var recipient: String?
+  public let channel: Channel?
+  public let delta: String?
+  public let contentType: ContentType?
+  public let recipient: Recipient?
+
+  public init(channel: Channel? = nil,
+              delta: String? = nil,
+              contentType: ContentType? = nil,
+              recipient: Recipient? = nil) {
+    self.channel = channel
+    self.delta = delta
+    self.contentType = contentType
+    self.recipient = recipient
+  }
 }
 
 public actor StreamableParser {
   private let inner: PicoHarmonyStreamParser
   private let decoder = HarmonyEncoding.makeDecoder()
-  private var lastSeenContentType: String?
-  private var lastSeenRecipient: String?
-  private var lastSeenChannel: String?
+  private var lastSeenContentType: ContentType?
+  private var lastSeenRecipient: Recipient?
+  private var lastSeenChannel: Channel?
 
   public init(encoding: HarmonyEncoding, role: Role? = nil, strict: Bool = true) throws {
     self.inner = try encoding.newStreamParser(role: role, strict: strict)
@@ -403,9 +531,9 @@ public actor StreamableParser {
   @discardableResult
   public func process(_ token: UInt32) throws -> StreamDelta {
     let delta = try inner.process(tokenId: token)
-    if let ct = delta.contentType { lastSeenContentType = ct }
-    if let r = delta.recipient { lastSeenRecipient = r }
-    if let ch = delta.channel { lastSeenChannel = ch }
+    if let ct = delta.contentType { lastSeenContentType = ContentType(rawValue: ct) }
+    if let r = delta.recipient { lastSeenRecipient = Recipient(rawValue: r) }
+    if let ch = delta.channel { lastSeenChannel = Channel(rawValue: ch) }
     return try currentDelta()
   }
 
@@ -421,9 +549,9 @@ public actor StreamableParser {
 
   public func currentContent() throws -> String { try inner.currentContent() }
   public func currentRole() throws -> Role? { try inner.currentRole().map(Role.init(rawValue:)) ?? nil }
-  public func currentChannel() throws -> String? { try inner.currentChannel() }
-  public func currentRecipient() throws -> String? { try inner.currentRecipient() }
-  public func currentContentType() throws -> String? { try inner.currentContentType() }
+  public func currentChannel() throws -> Channel? { try inner.currentChannel().map(Channel.init(rawValue:)) }
+  public func currentRecipient() throws -> Recipient? { try inner.currentRecipient().map(Recipient.init(rawValue:)) }
+  public func currentContentType() throws -> ContentType? { try inner.currentContentType().map(ContentType.init(rawValue:)) }
   public func lastContentDelta() throws -> String? { try inner.lastContentDelta() }
 
   public func messages() throws -> [Message] {
@@ -431,18 +559,18 @@ public actor StreamableParser {
     var msgs = try decoder.decode([Message].self, from: Data(json.utf8))
     if let idx = msgs.indices.last {
       if msgs[idx].contentType == nil {
-        if let ct = try inner.currentContentType() ?? lastSeenContentType {
-          msgs[idx].contentType = ct
+        if let ct = try inner.currentContentType() ?? lastSeenContentType?.rawValue {
+          msgs[idx].contentType = ContentType(rawValue: ct)
         }
       }
       if msgs[idx].recipient == nil {
-        if let r = try inner.currentRecipient() ?? lastSeenRecipient {
-          msgs[idx].recipient = r
+        if let r = try inner.currentRecipient() ?? lastSeenRecipient?.rawValue {
+          msgs[idx].recipient = Recipient(rawValue: r)
         }
       }
       if msgs[idx].channel == nil {
-        if let ch = try inner.currentChannel() ?? lastSeenChannel {
-          msgs[idx].channel = ch
+        if let ch = try inner.currentChannel() ?? lastSeenChannel?.rawValue {
+          msgs[idx].channel = Channel(rawValue: ch)
         }
       }
     }
@@ -453,10 +581,10 @@ public actor StreamableParser {
   public func stateJSON() throws -> String { try inner.stateJson() }
 
   private func currentDelta() throws -> StreamDelta {
-    StreamDelta(channel: try inner.currentChannel(),
+    StreamDelta(channel: try inner.currentChannel().map(Channel.init(rawValue:)),
                 delta: try inner.lastContentDelta(),
-                contentType: try inner.currentContentType(),
-                recipient: try inner.currentRecipient())
+                contentType: try inner.currentContentType().map(ContentType.init(rawValue:)),
+                recipient: try inner.currentRecipient().map(Recipient.init(rawValue:)))
   }
 }
 
