@@ -408,7 +408,7 @@ private func assertMessage(_ actual: Message, equals expected: Message) {
 
     let tokens = try enc.renderConversationForCompletion(convo, nextTurnRole: .assistant)
     let rendered = try enc.decodeUtf8(tokens)
-    #expect(lineSet(expectedText).isSubset(of: lineSet(rendered)))
+    #expect(rendered == expectedText)
   }
 
   @Test func renderNoTools() throws {
@@ -423,11 +423,12 @@ private func assertMessage(_ actual: Message, equals expected: Message) {
 
     let tokens = try enc.renderConversationForCompletion(convo, nextTurnRole: .assistant)
     #expect(tokens == expectedTokens)
+    let rendered = try enc.decodeUtf8(tokens)
+    #expect(rendered == expectedText)
   }
 
   @Test func renderBrowserToolOnly() throws {
     let expectedText = try readText("test_browser_tool_only.txt")
-    _ = expectedText
 
     var sys = SystemContent()
     sys.reasoningEffort = .medium
@@ -438,14 +439,11 @@ private func assertMessage(_ actual: Message, equals expected: Message) {
     let convo = Conversation(messages: [Message(author: Author(role: .system), content: [.system(sys)])])
     let tokens = try enc.renderConversationForCompletion(convo, nextTurnRole: .assistant)
     let rendered = try enc.decodeUtf8(tokens)
-    #expect(rendered.contains("namespace browser"))
-    #expect(rendered.contains("type search"))
-    #expect(rendered.contains("Valid channels"))
+    #expect(rendered == expectedText)
   }
 
   @Test func renderBrowserAndFunctionTool() throws {
     let expectedText = try readText("test_browser_and_function_tool.txt")
-    _ = expectedText
 
     var sys = SystemContent()
     sys.reasoningEffort = .medium
@@ -463,14 +461,11 @@ private func assertMessage(_ actual: Message, equals expected: Message) {
 
     let tokens = try enc.renderConversationForCompletion(convo, nextTurnRole: .assistant)
     let rendered = try enc.decodeUtf8(tokens)
-    #expect(rendered.contains("namespace browser"))
-    #expect(rendered.contains("namespace functions"))
-    #expect(rendered.contains("lookup_weather"))
+    #expect(rendered == expectedText)
   }
 
   @Test func renderBrowserAndPythonTool() throws {
     let expectedText = try readText("test_browser_and_python_tool.txt")
-    _ = expectedText
 
     var sys = SystemContent()
     sys.reasoningEffort = .medium
@@ -484,9 +479,7 @@ private func assertMessage(_ actual: Message, equals expected: Message) {
     let convo = Conversation(messages: [Message(author: Author(role: .system), content: [.system(sys)])])
     let tokens = try enc.renderConversationForCompletion(convo, nextTurnRole: .assistant)
     let rendered = try enc.decodeUtf8(tokens)
-    #expect(rendered.contains("namespace browser"))
-    #expect(rendered.contains("## python"))
-    #expect(rendered.contains("Valid channels"))
+    #expect(rendered == expectedText)
   }
 
   @Test func renderConversationForTrainingFinalChannel() throws {
