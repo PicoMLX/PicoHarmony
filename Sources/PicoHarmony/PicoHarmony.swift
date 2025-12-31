@@ -392,6 +392,9 @@ public struct StreamDelta: Sendable {
 public actor StreamableParser {
   private let inner: PicoHarmonyStreamParser
   private let decoder = HarmonyEncoding.makeDecoder()
+  private var lastSeenContentType: String?
+  private var lastSeenRecipient: String?
+  private var lastSeenChannel: String?
 
   public init(encoding: HarmonyEncoding, role: Role? = nil, strict: Bool = true) throws {
     self.inner = try encoding.newStreamParser(role: role, strict: strict)
@@ -399,7 +402,10 @@ public actor StreamableParser {
 
   @discardableResult
   public func process(_ token: UInt32) throws -> StreamDelta {
-    _ = try inner.process(tokenId: token)
+    let delta = try inner.process(tokenId: token)
+    if let ct = delta.contentType { lastSeenContentType = ct }
+    if let r = delta.recipient { lastSeenRecipient = r }
+    if let ch = delta.channel { lastSeenChannel = ch }
     return try currentDelta()
   }
 
@@ -422,7 +428,25 @@ public actor StreamableParser {
 
   public func messages() throws -> [Message] {
     let json = try inner.messagesJson()
-    return try decoder.decode([Message].self, from: Data(json.utf8))
+    var msgs = try decoder.decode([Message].self, from: Data(json.utf8))
+    if let idx = msgs.indices.last {
+      if msgs[idx].contentType == nil {
+        if let ct = try inner.currentContentType() ?? lastSeenContentType {
+          msgs[idx].contentType = ct
+        }
+      }
+      if msgs[idx].recipient == nil {
+        if let r = try inner.currentRecipient() ?? lastSeenRecipient {
+          msgs[idx].recipient = r
+        }
+      }
+      if msgs[idx].channel == nil {
+        if let ch = try inner.currentChannel() ?? lastSeenChannel {
+          msgs[idx].channel = ch
+        }
+      }
+    }
+    return msgs
   }
 
   public func tokens() throws -> [UInt32] { try inner.tokens() }

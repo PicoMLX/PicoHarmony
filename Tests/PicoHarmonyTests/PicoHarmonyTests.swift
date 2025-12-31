@@ -351,6 +351,10 @@ private func assertMessage(_ actual: Message, equals expected: Message) {
     ]
     #expect(parsed.count == expected.count)
     zip(parsed, expected).forEach { assertMessage($0.0, equals: $0.1) }
+    let decoded = try enc.decodeUtf8(tokens)
+    #expect(decoded == text)
+    let roundtrip = try enc.renderConversation(Conversation(messages: expected))
+    #expect(roundtrip == tokens)
   }
 
   @Test func toolCallWithConstrainMarkerAdjacent() throws {
@@ -659,17 +663,17 @@ private func assertMessage(_ actual: Message, equals expected: Message) {
   }
 
   @Test func streamableParserToolCallWithConstrainAdjacent() async throws {
-    let text = "<|start|>assistant<|channel|>commentary to=functions.get_weather<|constrain|>json<|message|>{\\\"latitude\\\":48.8566,\\\"longitude\\\":2.3522}<|call|>"
+    let text = "<|start|>assistant<|channel|>commentary to=functions.get_weather<|constrain|>json<|message|>{\"latitude\":48.8566,\"longitude\":2.3522}<|call|>"
     let tokens = try enc.encode(text, policy: .allowAll)
     let parser = try StreamableParser(encoding: enc, role: nil)
     for t in tokens { _ = try await parser.process(t) }
     let msgs = try await parser.messages()
     let expected = [
       Message(author: Author(role: .assistant),
-              content: [.text(TextContent("{\\\"latitude\\\":48.8566,\\\"longitude\\\":2.3522}"))],
+              content: [.text(TextContent("{\"latitude\":48.8566,\"longitude\":2.3522}"))],
               channel: "commentary",
               recipient: "functions.get_weather",
-              contentType: nil)
+              contentType: "<|constrain|>json")
     ]
     #expect(msgs.count == expected.count)
     zip(msgs, expected).forEach { assertMessage($0.0, equals: $0.1) }
@@ -727,7 +731,7 @@ private func assertMessage(_ actual: Message, equals expected: Message) {
   }
 
   @Test func streamableParserMissingMessageTokenToolCall() async throws {
-    let text = "... Let's use the tool.<|end|><|start|>assistant to=functions.get_weather<|channel|>commentary json<|message|>{\\\"location\\\": \"Tokyo\"}<|call|>"
+    let text = "... Let's use the tool.<|end|><|start|>assistant to=functions.get_weather<|channel|>commentary json<|message|>{\"location\": \"Tokyo\"}<|call|>"
     let tokens = try enc.encode(text, policy: .allowAll)
     for strict in [false, true] {
       let parser = try StreamableParser(encoding: enc, role: .assistant, strict: strict)
@@ -742,7 +746,7 @@ private func assertMessage(_ actual: Message, equals expected: Message) {
         let msgs = try await parser.messages()
         let expected = [
           Message(author: Author(role: .assistant), content: [.text(TextContent("... Let's use the tool."))]),
-          Message(author: Author(role: .assistant), content: [.text(TextContent("{\\\"location\\\": \"Tokyo\"}"))], channel: "commentary", recipient: "functions.get_weather", contentType: nil),
+          Message(author: Author(role: .assistant), content: [.text(TextContent("{\"location\": \"Tokyo\"}"))], channel: "commentary", recipient: "functions.get_weather", contentType: "json"),
         ]
         #expect(msgs.count == expected.count)
         zip(msgs, expected).forEach { assertMessage($0.0, equals: $0.1) }
