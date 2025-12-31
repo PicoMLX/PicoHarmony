@@ -8,7 +8,7 @@ Add the package to your `Package.swift`:
 
 ```swift
 dependencies: [
-  .package(url: "https://github.com/<your-org>/PicoHarmony.git", branch: "master"),
+  .package(url: "https://github.com/picoHarmony/PicoHarmony.git", branch: "master"),
 ],
 targets: [
   .target(
