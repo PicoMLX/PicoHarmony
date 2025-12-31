@@ -1,0 +1,13 @@
+[package]
+name = "harmony_uniffi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+openai-harmony = { version = "0.0.8", path = "../openai-harmony" }
+uniffi = { version = "0.30.0", features = ["cli"] }
+thiserror = "1"
+serde_json = "1"
