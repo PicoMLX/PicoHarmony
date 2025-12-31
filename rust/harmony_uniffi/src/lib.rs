@@ -271,6 +271,23 @@ pub fn load_harmony_encoding_ffi(name: String) -> Result<HarmonyEncodingFfi, Pic
     HarmonyEncodingFfi::new(name)
 }
 
+#[uniffi::export]
+pub fn get_tool_namespace_config_json(tool: String) -> Result<String, PicoHarmonyError> {
+    use openai_harmony::chat::ToolNamespaceConfig;
+    let cfg = match tool.as_str() {
+        "browser" => ToolNamespaceConfig::browser(),
+        "python" => ToolNamespaceConfig::python(),
+        _ => return Err(err(format!("Unknown tool namespace: {tool}"))),
+    };
+    serde_json::to_string(&cfg).map_err(err)
+}
+
+#[uniffi::export]
+pub fn get_default_system_content_json() -> Result<String, PicoHarmonyError> {
+    use openai_harmony::chat::SystemContent;
+    serde_json::to_string(&SystemContent::default()).map_err(err)
+}
+
 #[derive(uniffi::Object)]
 pub struct PicoHarmonyStreamParser {
     // Interior mutability so UniFFI can keep the object behind Arc.

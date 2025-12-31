@@ -109,28 +109,77 @@ public struct ToolNamespaceConfig: Codable, Sendable {
     self.description = description
     self.tools = tools
   }
+
+  /// Returns the canonical browser tool namespace configuration from Rust.
+  public static func browser() throws -> ToolNamespaceConfig {
+    let json = try getToolNamespaceConfigJson(tool: "browser")
+    let decoder = HarmonyEncoding.makeDecoder()
+    return try decoder.decode(ToolNamespaceConfig.self, from: Data(json.utf8))
+  }
+
+  /// Returns the canonical python tool namespace configuration from Rust.
+  public static func python() throws -> ToolNamespaceConfig {
+    let json = try getToolNamespaceConfigJson(tool: "python")
+    let decoder = HarmonyEncoding.makeDecoder()
+    return try decoder.decode(ToolNamespaceConfig.self, from: Data(json.utf8))
+  }
 }
 
 public struct SystemContent: Codable, Sendable {
-  public var modelIdentity: String? = "You are ChatGPT, a large language model trained by OpenAI."
-  public var reasoningEffort: ReasoningEffort? = .medium
-  public var conversationStartDate: String? = nil
-  public var knowledgeCutoff: String? = "2024-06"
-  public var channelConfig: ChannelConfig? = .requireChannels(["analysis", "commentary", "final"])
-  public var tools: [String: ToolNamespaceConfig]? = nil
+  public var modelIdentity: String?
+  public var reasoningEffort: ReasoningEffort?
+  public var conversationStartDate: String?
+  public var knowledgeCutoff: String?
+  public var channelConfig: ChannelConfig?
+  public var tools: [String: ToolNamespaceConfig]?
 
   public init(modelIdentity: String? = nil,
-              reasoningEffort: ReasoningEffort? = .medium,
+              reasoningEffort: ReasoningEffort? = nil,
               conversationStartDate: String? = nil,
-              knowledgeCutoff: String? = "2024-06",
-              channelConfig: ChannelConfig? = .requireChannels(["analysis", "commentary", "final"]),
+              knowledgeCutoff: String? = nil,
+              channelConfig: ChannelConfig? = nil,
               tools: [String: ToolNamespaceConfig]? = nil) {
-    self.modelIdentity = modelIdentity ?? self.modelIdentity
+    self.modelIdentity = modelIdentity
     self.reasoningEffort = reasoningEffort
     self.conversationStartDate = conversationStartDate
     self.knowledgeCutoff = knowledgeCutoff
     self.channelConfig = channelConfig
     self.tools = tools
+  }
+
+  /// Returns the canonical default SystemContent from Rust.
+  public static func makeDefault() throws -> SystemContent {
+    let json = try getDefaultSystemContentJson()
+    let decoder = HarmonyEncoding.makeDecoder()
+    return try decoder.decode(SystemContent.self, from: Data(json.utf8))
+  }
+
+  /// Adds the browser tool namespace to this SystemContent.
+  public mutating func withBrowserTool() throws {
+    let browserConfig = try ToolNamespaceConfig.browser()
+    if tools == nil { tools = [:] }
+    tools?[browserConfig.name] = browserConfig
+  }
+
+  /// Adds the python tool namespace to this SystemContent.
+  public mutating func withPythonTool() throws {
+    let pythonConfig = try ToolNamespaceConfig.python()
+    if tools == nil { tools = [:] }
+    tools?[pythonConfig.name] = pythonConfig
+  }
+
+  /// Returns a copy with the browser tool added.
+  public func addingBrowserTool() throws -> SystemContent {
+    var copy = self
+    try copy.withBrowserTool()
+    return copy
+  }
+
+  /// Returns a copy with the python tool added.
+  public func addingPythonTool() throws -> SystemContent {
+    var copy = self
+    try copy.withPythonTool()
+    return copy
   }
 }
 
@@ -141,6 +190,20 @@ public struct DeveloperContent: Codable, Sendable {
   public init(instructions: String? = nil, tools: [String: ToolNamespaceConfig]? = nil) {
     self.instructions = instructions
     self.tools = tools
+  }
+
+  /// Adds function tools under the "functions" namespace.
+  public mutating func withFunctionTools(_ functionTools: [ToolDescription]) {
+    let config = ToolNamespaceConfig(name: "functions", description: nil, tools: functionTools)
+    if tools == nil { tools = [:] }
+    tools?[config.name] = config
+  }
+
+  /// Returns a copy with function tools added.
+  public func addingFunctionTools(_ functionTools: [ToolDescription]) -> DeveloperContent {
+    var copy = self
+    copy.withFunctionTools(functionTools)
+    return copy
   }
 }
 
@@ -481,8 +544,8 @@ public struct HarmonyEncoding: Sendable {
   private static func makeEncoder() -> JSONEncoder {
     let enc = JSONEncoder()
     enc.keyEncodingStrategy = .convertToSnakeCase
-    // The Rust renderer may preserve map insertion order when emitting tool schemas.
-    // Using sorted keys ensures stable output that matches fixtures.
+    // Using sortedKeys for deterministic output. Note that this may produce different
+    // key ordering than Python/Rust for nested JSON objects like tool parameters.
     enc.outputFormatting = [.sortedKeys]
     return enc
   }

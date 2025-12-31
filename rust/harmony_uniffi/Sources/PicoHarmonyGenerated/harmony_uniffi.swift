@@ -1589,6 +1589,19 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
         return seq
     }
 }
+public func getDefaultSystemContentJson()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypePicoHarmonyError_lift) {
+    uniffi_harmony_uniffi_fn_func_get_default_system_content_json($0
+    )
+})
+}
+public func getToolNamespaceConfigJson(tool: String)throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypePicoHarmonyError_lift) {
+    uniffi_harmony_uniffi_fn_func_get_tool_namespace_config_json(
+        FfiConverterString.lower(tool),$0
+    )
+})
+}
 public func loadHarmonyEncodingFfi(name: String)throws  -> HarmonyEncodingFfi  {
     return try  FfiConverterTypeHarmonyEncodingFfi_lift(try rustCallWithError(FfiConverterTypePicoHarmonyError_lift) {
     uniffi_harmony_uniffi_fn_func_load_harmony_encoding_ffi(
@@ -1611,6 +1624,12 @@ private let initializationResult: InitializationResult = {
     let scaffolding_contract_version = ffi_harmony_uniffi_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
+    }
+    if (uniffi_harmony_uniffi_checksum_func_get_default_system_content_json() != 43923) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_harmony_uniffi_checksum_func_get_tool_namespace_config_json() != 25673) {
+        return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_harmony_uniffi_checksum_func_load_harmony_encoding_ffi() != 53996) {
         return InitializationResult.apiChecksumMismatch
