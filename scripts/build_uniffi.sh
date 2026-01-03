@@ -5,6 +5,15 @@ set -euo pipefail
 # because the per-target std/core libraries are distributed via rustup components.
 RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}"
 
+# Explicit deployment targets to avoid producing object files that target the
+# host macOS version (e.g. 26.x) when consumers link against macOS 15.0.
+MACOS_DEPLOYMENT_TARGET="${MACOS_DEPLOYMENT_TARGET:-15.0}"
+IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-18.0}"
+
+export MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"
+export IPHONEOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET"
+export IPHONESIMULATOR_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET"
+
 # Ensure the toolchain exists (no-op if already installed)
 rustup toolchain install "$RUSTUP_TOOLCHAIN" >/dev/null 2>&1 || true
 
