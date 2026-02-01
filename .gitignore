@@ -12,7 +12,6 @@ DerivedData/
 debug
 target
 
-# Local build artifacts
-Binaries/
+# Local build artifacts (Binaries/ is tracked for SPM binary target)
 Sources/PicoHarmonyGenerated/
 rust/harmony_uniffi/build/

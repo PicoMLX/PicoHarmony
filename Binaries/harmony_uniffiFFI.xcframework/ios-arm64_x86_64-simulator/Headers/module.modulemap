@@ -1,0 +1,4 @@
+module harmony_uniffiFFI {
+  header "harmony_uniffiFFI.h"
+  export *
+}
