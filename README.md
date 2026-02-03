@@ -161,6 +161,35 @@ let stopTokens = try enc.stopTokens()
 let actionStopTokens = try enc.stopTokensForAssistantActions() // For tool calls
 ```
 
+### QoS Priority Inversion Warning
+
+When calling `StreamableParser` from high-QoS Swift code (e.g., UI-related tasks), you may see this warning in the console:
+
+```
+Thread running at User-initiated quality-of-service class waiting on a
+lower QoS thread running at Default quality-of-service class
+```
+
+**This warning is benign.** It occurs because the underlying Rust parser uses `std::sync::Mutex`, which doesn't participate in Darwin's QoS priority inheritance. There's no crash risk, no App Store rejection concern, and the OS mitigates via priority boosting.
+
+To suppress the warning, wrap heavy parsing operations in a background task:
+
+```swift
+// Option 1: Detached task with background priority
+Task.detached(priority: .background) {
+    for token in outputTokens {
+        let delta = try await parser.process(token)
+        // Handle delta...
+    }
+}
+
+// Option 2: Dedicated dispatch queue
+let parserQueue = DispatchQueue(label: "com.myapp.parser", qos: .utility)
+parserQueue.async {
+    // Parsing work here
+}
+```
+
 ## API Parity with Python
 
 This library mirrors the Python `openai-harmony` API, making it easy to port examples:

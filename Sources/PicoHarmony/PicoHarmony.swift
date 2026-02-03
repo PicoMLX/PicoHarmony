@@ -565,6 +565,25 @@ public struct HarmonyEncoding: Sendable {
 
 // MARK: - Streamable parser (actor for safety)
 
+// Note: QoS Priority Inversion Warning
+// -------------------------------------
+// When calling StreamableParser from high-QoS Swift code, you may see:
+//   "Thread running at User-initiated quality-of-service class waiting on a
+//    lower QoS thread running at Default quality-of-service class"
+//
+// This occurs because the underlying Rust `PicoHarmonyStreamParser` uses
+// `std::sync::Mutex`, which doesn't participate in Darwin's QoS priority
+// inheritance. The warning is benign and does not cause crashes or App Store
+// rejection. The OS mitigates via priority boosting.
+//
+// To avoid the warning, wrap parsing in a background task:
+//   Task.detached(priority: .background) {
+//       let delta = try await parser.process(token)
+//   }
+//
+// Or use a dedicated dispatch queue with explicit QoS:
+//   let parserQueue = DispatchQueue(label: "parser", qos: .utility)
+
 public struct StreamDelta: Sendable {
   public let channel: Channel?
   public let delta: String?
