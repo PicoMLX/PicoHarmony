@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Testing
 @testable import Harmony
 
@@ -941,5 +942,28 @@ private func assertMessage(_ actual: Message, equals expected: Message) {
     #expect(msgs.count == expected.count)
     zip(msgs, expected).forEach { assertMessage($0.0, equals: $0.1) }
     #expect(deltas.joined() == tricky)
+  }
+
+  @Test func bundledTokenizerIsEnabledByDefaultWhenEnvNotSet() throws {
+    let envKey = "TIKTOKEN_ENCODINGS_BASE"
+    let previousBaseDir = getenv(envKey).map { String(cString: $0) }
+    unsetenv(envKey)
+    defer {
+      if let previousBaseDir {
+        setenv(envKey, previousBaseDir, 1)
+      } else {
+        unsetenv(envKey)
+      }
+    }
+
+    _ = try HarmonyEncoding(name: .harmonyGptOss)
+
+    guard let basePtr = getenv(envKey) else {
+      Issue.record("Expected \(envKey) to be set")
+      return
+    }
+    let baseDir = String(cString: basePtr)
+    let expectedFile = URL(fileURLWithPath: baseDir, isDirectory: true).appendingPathComponent("o200k_base.tiktoken")
+    #expect(FileManager.default.fileExists(atPath: expectedFile.path))
   }
 }

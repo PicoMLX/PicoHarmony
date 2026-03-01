@@ -20,6 +20,20 @@ targets: [
 
 The binary target `harmony_uniffiFFI` is checked in under `Binaries/`. If you need to rebuild it (e.g., after updating the Rust submodule), run `scripts/build_uniffi.sh` with a Rust toolchain installed via `rustup` and iOS/macOS targets available.
 
+## Offline Tokenizer Behavior
+
+`HarmonyEncoding` now defaults to bundled/offline tokenizer loading. The package ships
+`o200k_base.tiktoken`, and on first use it configures Rust to load from bundled assets.
+
+In most apps, no setup call is required:
+
+```swift
+let enc = try HarmonyEncoding(name: .harmonyGptOss)
+```
+
+If you need a custom tokenizer location, set `TIKTOKEN_ENCODINGS_BASE` in your process
+environment before creating `HarmonyEncoding`.
+
 ## Quickstart
 
 ```swift

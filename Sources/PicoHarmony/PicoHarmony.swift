@@ -1,5 +1,6 @@
 import Foundation
 import HarmonyUniFFI
+import Darwin
 
 // MARK: - Errors
 
@@ -403,10 +404,13 @@ public enum DecodeErrorMode: String, Sendable {
 /// We avoid storing `JSONEncoder` / `JSONDecoder` instances (which are reference types and not
 /// guaranteed thread-safe) by creating them as-needed.
 public struct HarmonyEncoding: Sendable {
+  private static let bundledTokenizerBaseEnvVar = "TIKTOKEN_ENCODINGS_BASE"
+
   private let inner: HarmonyEncodingFfi
   private let cachedSpecialTokens: Set<String>
 
   public init(name: HarmonyEncodingName = .harmonyGptOss) throws {
+    try Self.configureBundledTokenizerBaseDirectoryIfNeeded()
     self.inner = try HarmonyEncodingFfi(name: name.rawValue)
     self.cachedSpecialTokens = Set(inner.specialTokens())
   }
@@ -560,6 +564,32 @@ public struct HarmonyEncoding: Sendable {
     let dec = JSONDecoder()
     dec.keyDecodingStrategy = .useDefaultKeys
     return dec
+  }
+
+  private static func configureBundledTokenizerBaseDirectoryIfNeeded() throws {
+    if getenv(bundledTokenizerBaseEnvVar) != nil {
+      return
+    }
+
+    guard let tokenizerFileURL = bundledTokenizerFileURL() else {
+      throw HarmonyError.Msg("Bundled tokenizer file o200k_base.tiktoken was not found in Harmony resources.")
+    }
+
+    let baseDirectory = tokenizerFileURL.deletingLastPathComponent().path
+    guard setenv(bundledTokenizerBaseEnvVar, baseDirectory, 1) == 0 else {
+      let err = String(cString: strerror(errno))
+      throw HarmonyError.Msg("Failed setting \(bundledTokenizerBaseEnvVar) to \(baseDirectory): \(err)")
+    }
+  }
+
+  private static func bundledTokenizerFileURL() -> URL? {
+    if let url = Bundle.module.url(forResource: "o200k_base", withExtension: "tiktoken", subdirectory: "tiktoken") {
+      return url
+    }
+    if let url = Bundle.module.url(forResource: "o200k_base", withExtension: "tiktoken", subdirectory: "Resources/tiktoken") {
+      return url
+    }
+    return Bundle.module.url(forResource: "o200k_base", withExtension: "tiktoken")
   }
 }
 

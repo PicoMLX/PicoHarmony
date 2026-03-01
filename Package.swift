@@ -25,7 +25,10 @@ let package = Package(
     .target(
       name: "Harmony",
       dependencies: ["HarmonyUniFFI"],
-      path: "Sources/PicoHarmony"
+      path: "Sources/PicoHarmony",
+      resources: [
+        .copy("Resources/tiktoken/o200k_base.tiktoken")
+      ]
     ),
     .testTarget(
       name: "PicoHarmonyTests",
