@@ -42,11 +42,20 @@ rustup target add --toolchain "$RUSTUP_TOOLCHAIN" \
 # can't be named by dependent crates even though the public render_conversation*
 # methods take them as parameters. Re-export them from the submodule before
 # building. Guarded (idempotent, and a no-op if upstream ever exposes them).
-HARMONY_LIB_RS="rust/openai-harmony/src/lib.rs"
+# Absolute path so the restore trap below resolves correctly regardless of the
+# working directory at exit (the script pushd's into $CRATE before finishing).
+HARMONY_LIB_RS="$(pwd)/rust/openai-harmony/src/lib.rs"
 if [ -f "$HARMONY_LIB_RS" ] && ! grep -q "RenderConversationConfig" "$HARMONY_LIB_RS"; then
+  # Restore the submodule file on exit so the build never leaves openai-harmony's
+  # git working tree dirty (which can block branch switches or be committed by
+  # accident). The re-export is only needed at build time and is re-applied on
+  # every run, so it doesn't need to persist.
+  HARMONY_LIB_RS_BACKUP="$(mktemp)"
+  cp "$HARMONY_LIB_RS" "$HARMONY_LIB_RS_BACKUP"
+  trap 'mv -f "$HARMONY_LIB_RS_BACKUP" "$HARMONY_LIB_RS"' EXIT
   cat >> "$HARMONY_LIB_RS" <<'EOF'
 
-// Added by PicoHarmony's scripts/build_uniffi.sh: expose the render config /
+// Added at build time by scripts/build_uniffi.sh: expose the render config /
 // options types that upstream leaves unreachable inside a private module.
 pub use encoding::{RenderConversationConfig, RenderOptions};
 EOF
@@ -107,10 +116,11 @@ lipo -create "$MAC_ARM_LIB" "$MAC_X64_LIB" -output "$MAC_FAT_LIB"
 # The framework binary is still the static archive, so linking semantics are
 # unchanged and nothing is embedded at runtime.
 make_framework() {
-  local lib_path="$1"   # static archive for this slice
-  local slice_dir="$2"  # output directory for this slice
-  local min_os_key="$3" # MinimumOSVersion (iOS) or LSMinimumSystemVersion (macOS)
+  local lib_path="$1"    # static archive for this slice
+  local slice_dir="$2"   # output directory for this slice
+  local min_os_key="$3"  # MinimumOSVersion (iOS) or LSMinimumSystemVersion (macOS)
   local min_os_ver="$4"
+  local platform="$5"    # CFBundleSupportedPlatforms value: iPhoneOS / iPhoneSimulator / MacOSX
 
   local fw="$slice_dir/${FRAMEWORK_NAME}.framework"
   rm -rf "$fw"
@@ -143,6 +153,10 @@ EOF
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>${platform}</string>
+	</array>
 	<key>${min_os_key}</key>
 	<string>${min_os_ver}</string>
 </dict>
@@ -150,9 +164,9 @@ EOF
 EOF
 }
 
-make_framework "$IOS_LIB"     build/frameworks/ios     MinimumOSVersion       "$IOS_DEPLOYMENT_TARGET"
-make_framework "$SIM_FAT_LIB" build/frameworks/ios-sim MinimumOSVersion       "$IOS_DEPLOYMENT_TARGET"
-make_framework "$MAC_FAT_LIB" build/frameworks/macos   LSMinimumSystemVersion "$MACOS_DEPLOYMENT_TARGET"
+make_framework "$IOS_LIB"     build/frameworks/ios     MinimumOSVersion       "$IOS_DEPLOYMENT_TARGET"   iPhoneOS
+make_framework "$SIM_FAT_LIB" build/frameworks/ios-sim MinimumOSVersion       "$IOS_DEPLOYMENT_TARGET"   iPhoneSimulator
+make_framework "$MAC_FAT_LIB" build/frameworks/macos   LSMinimumSystemVersion "$MACOS_DEPLOYMENT_TARGET" MacOSX
 
 popd >/dev/null
 
