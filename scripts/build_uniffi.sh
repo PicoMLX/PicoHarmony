@@ -22,6 +22,7 @@ OUT_XC="Binaries/harmony_uniffiFFI.xcframework"
 OUT_SWIFT="Sources/PicoHarmonyGenerated"
 
 LIB_NAME="libharmony_uniffi.a"
+FRAMEWORK_NAME="harmony_uniffiFFI"
 
 mkdir -p Binaries "$OUT_SWIFT"
 
@@ -40,11 +41,10 @@ pushd "$CRATE" >/dev/null
 rustup run "$RUSTUP_TOOLCHAIN" cargo build --release
 HOST_LIB="target/release/${LIB_NAME}"
 
-# 2) Generate Swift + headers + modulemap (XCFramework-friendly)
-rm -rf "$OUT_SWIFT" build/uniffi build/xc_headers build/fat
+# 2) Generate Swift + headers (XCFramework-friendly)
+rm -rf "$OUT_SWIFT" build/uniffi build/fat build/frameworks
 mkdir -p \
-  build/uniffi/Headers build/uniffi/Modules \
-  build/xc_headers/Headers build/xc_headers/Modules \
+  build/uniffi/Headers \
   build/fat/ios-sim build/fat/macos \
   "$OUT_SWIFT"
 
@@ -55,30 +55,6 @@ rustup run "$RUSTUP_TOOLCHAIN" cargo run --release --bin uniffi-bindgen-swift --
 # C header(s)
 rustup run "$RUSTUP_TOOLCHAIN" cargo run --release --bin uniffi-bindgen-swift -- \
   "$HOST_LIB" build/uniffi/Headers --headers
-
-# Modulemap for XCFramework packaging
-rustup run "$RUSTUP_TOOLCHAIN" cargo run --release --bin uniffi-bindgen-swift -- \
-  "$HOST_LIB" build/uniffi/Modules --xcframework --modulemap --modulemap-filename module.modulemap
-
-cp -R build/uniffi/Headers/* build/xc_headers/Headers/
-cp -R build/uniffi/Modules/* build/xc_headers/Modules/
-
-# Ensure the modulemap matches the expected Swift import module name and is suitable for static libs
-MODULEMAP_PATH="build/xc_headers/Modules/module.modulemap"
-if [ -f "$MODULEMAP_PATH" ]; then
-  cat > "$MODULEMAP_PATH" <<'EOF'
-module harmony_uniffiFFI {
-  header "harmony_uniffiFFI.h"
-  export *
-}
-EOF
-fi
-
-# Flatten headers/modules into a single directory for xcodebuild
-rm -rf build/xc_headers_flat
-mkdir -p build/xc_headers_flat
-cp build/xc_headers/Headers/* build/xc_headers_flat/
-cp "$MODULEMAP_PATH" build/xc_headers_flat/
 
 # 3) Build libs for each target
 rustup run "$RUSTUP_TOOLCHAIN" cargo build --release --target aarch64-apple-ios
@@ -102,14 +78,72 @@ MAC_FAT_LIB="build/fat/macos/${LIB_NAME}"
 lipo -create "$SIM_ARM_LIB" "$SIM_X64_LIB" -output "$SIM_FAT_LIB"
 lipo -create "$MAC_ARM_LIB" "$MAC_X64_LIB" -output "$MAC_FAT_LIB"
 
+# 5) Assemble a static framework bundle per slice.
+#
+# Framework-bundle slices keep module.modulemap inside the bundle
+# (Modules/module.modulemap). Bare -library/-headers slices instead ship a
+# root Headers/module.modulemap that Xcode stages into the shared
+# Build/Products/<config>/include/, which collides with any other static-lib
+# XCFramework in the same build (e.g. chroma-swift's chroma_swiftFFI) and
+# fails with "Multiple commands produce .../include/module.modulemap".
+# The framework binary is still the static archive, so linking semantics are
+# unchanged and nothing is embedded at runtime.
+make_framework() {
+  local lib_path="$1"   # static archive for this slice
+  local slice_dir="$2"  # output directory for this slice
+  local min_os_key="$3" # MinimumOSVersion (iOS) or LSMinimumSystemVersion (macOS)
+  local min_os_ver="$4"
+
+  local fw="$slice_dir/${FRAMEWORK_NAME}.framework"
+  rm -rf "$fw"
+  mkdir -p "$fw/Headers" "$fw/Modules"
+
+  cp "$lib_path" "$fw/${FRAMEWORK_NAME}"
+  cp build/uniffi/Headers/* "$fw/Headers/"
+
+  cat > "$fw/Modules/module.modulemap" <<EOF
+framework module ${FRAMEWORK_NAME} {
+  umbrella header "${FRAMEWORK_NAME}.h"
+  export *
+}
+EOF
+
+  cat > "$fw/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>${FRAMEWORK_NAME}</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.picomlx.harmony-uniffi-ffi</string>
+	<key>CFBundleName</key>
+	<string>${FRAMEWORK_NAME}</string>
+	<key>CFBundlePackageType</key>
+	<string>FMWK</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>${min_os_key}</key>
+	<string>${min_os_ver}</string>
+</dict>
+</plist>
+EOF
+}
+
+make_framework "$IOS_LIB"     build/frameworks/ios     MinimumOSVersion       "$IOS_DEPLOYMENT_TARGET"
+make_framework "$SIM_FAT_LIB" build/frameworks/ios-sim MinimumOSVersion       "$IOS_DEPLOYMENT_TARGET"
+make_framework "$MAC_FAT_LIB" build/frameworks/macos   LSMinimumSystemVersion "$MACOS_DEPLOYMENT_TARGET"
+
 popd >/dev/null
 
-# 5) Create XCFramework with iOS + iOS-sim + macOS
+# 6) Create XCFramework with iOS + iOS-sim + macOS framework slices
 rm -rf "$OUT_XC"
 xcodebuild -create-xcframework \
-  -library "$CRATE/$IOS_LIB" -headers "$CRATE/build/xc_headers_flat" \
-  -library "$CRATE/$SIM_FAT_LIB" -headers "$CRATE/build/xc_headers_flat" \
-  -library "$CRATE/$MAC_FAT_LIB" -headers "$CRATE/build/xc_headers_flat" \
+  -framework "$CRATE/build/frameworks/ios/${FRAMEWORK_NAME}.framework" \
+  -framework "$CRATE/build/frameworks/ios-sim/${FRAMEWORK_NAME}.framework" \
+  -framework "$CRATE/build/frameworks/macos/${FRAMEWORK_NAME}.framework" \
   -output "$OUT_XC"
 
 echo "✅ Generated:"

@@ -1,0 +1,70 @@
+# Rebuilds Binaries/harmony_uniffiFFI.xcframework on a macOS runner whenever
+# the Rust sources or the packaging script change, verifies the Swift package
+# against the fresh binaries, and commits the result back to the triggering
+# branch. Pushes made with the default GITHUB_TOKEN do not trigger new
+# workflow runs, so the commit-back step cannot loop.
+name: Build XCFramework
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'rust/**'
+      - 'scripts/build_uniffi.sh'
+      - '.github/workflows/build-xcframework.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-xcframework-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build harmony_uniffiFFI.xcframework
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # Package.swift declares swift-tools-version 6.2, which needs Xcode 26+.
+      # Pick the newest non-beta Xcode on the runner image.
+      - name: Select latest stable Xcode
+        run: |
+          XCODE_APP="$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -n 1)"
+          echo "Using $XCODE_APP"
+          sudo xcode-select -s "$XCODE_APP"
+          swift --version
+
+      - name: Install Rust toolchain and Apple targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust/harmony_uniffi
+
+      - name: Build XCFramework
+        run: ./scripts/build_uniffi.sh
+
+      - name: Verify package builds against rebuilt binaries
+        run: swift build
+
+      - name: Run tests
+        run: swift test
+
+      - name: Commit rebuilt binaries
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Binaries rust/harmony_uniffi/Sources/PicoHarmonyGenerated
+          if git diff --cached --quiet; then
+            echo "Rebuilt output identical to committed binaries; nothing to commit."
+          else
+            git commit -m "Rebuild harmony_uniffiFFI.xcframework"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi

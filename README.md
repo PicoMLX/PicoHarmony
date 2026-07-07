@@ -222,7 +222,7 @@ This library mirrors the Python `openai-harmony` API, making it easy to port exa
 - `Sources/Harmony/` – Swift API surface
 - `rust/harmony_uniffi/` – UniFFI bridge code
 - `rust/openai-harmony/` – upstream Harmony Rust submodule
-- `Binaries/harmony_uniffiFFI.xcframework` – prebuilt static libs + headers
+- `Binaries/harmony_uniffiFFI.xcframework` – prebuilt XCFramework (static framework-bundle slices)
 - `Tests/PicoHarmonyTests/` – Swift test suite (parity with Python fixtures)
 
 ## Development
@@ -234,5 +234,25 @@ swift test
 # Rebuild XCFramework (if Rust sources change)
 ./scripts/build_uniffi.sh
 ```
+
+You normally don't need a local Rust toolchain: pushing changes under
+`rust/**` or to `scripts/build_uniffi.sh` triggers the
+[Build XCFramework](.github/workflows/build-xcframework.yml) GitHub Actions
+workflow, which rebuilds `Binaries/harmony_uniffiFFI.xcframework` on a macOS
+runner, verifies `swift build` / `swift test` against the fresh binaries, and
+commits them back to the branch.
+
+### Binary packaging
+
+The XCFramework uses framework-bundle slices (`harmony_uniffiFFI.framework`
+with `Modules/module.modulemap`) instead of bare static-library slices.
+Bare-library slices put `module.modulemap` at the root of `Headers/`, which
+Xcode stages into the shared `Build/Products/<config>/include/` directory —
+so any build that also links another static-lib XCFramework packaged the same
+way (e.g. chroma-swift's `chroma_swiftFFI`) fails with
+`Multiple commands produce '…/include/module.modulemap'`. With framework
+bundles the module map stays inside the uniquely named bundle and no shared
+path is claimed. The framework binary is still a static archive, so consumers
+link exactly as before and nothing is embedded at runtime.
 
 For details on the Harmony format itself, see the upstream project: <https://github.com/openai/harmony>.
