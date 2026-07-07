@@ -64,7 +64,21 @@ jobs:
           git add Binaries rust/harmony_uniffi/Sources/PicoHarmonyGenerated
           if git diff --cached --quiet; then
             echo "Rebuilt output identical to committed binaries; nothing to commit."
-          else
-            git commit -m "Rebuild harmony_uniffiFFI.xcframework"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
+            exit 0
           fi
+          git commit -m "Rebuild harmony_uniffiFFI.xcframework"
+          # The rebuild takes ~20 min, so the branch may have advanced while it
+          # ran. Rebase the binary commit onto the latest tip and retry rather
+          # than failing on a non-fast-forward push. Only Binaries/ and the
+          # generated bindings change here, so the rebase is conflict-free in
+          # practice; abort and fail loudly if it isn't.
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+              exit 0
+            fi
+            echo "Push rejected (branch moved?); rebasing on latest and retrying (${attempt})..."
+            git fetch origin "${GITHUB_REF_NAME}"
+            git rebase "origin/${GITHUB_REF_NAME}" || { git rebase --abort; exit 1; }
+          done
+          echo "Failed to push rebuilt binaries after retries." >&2
+          exit 1
