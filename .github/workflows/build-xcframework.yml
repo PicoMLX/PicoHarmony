@@ -33,9 +33,15 @@ jobs:
       # Pick the newest non-beta Xcode on the runner image.
       - name: Select latest stable Xcode
         run: |
-          XCODE_APP="$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -n 1)"
-          echo "Using $XCODE_APP"
-          sudo xcode-select -s "$XCODE_APP"
+          # `sort -V` works on the macos runner's sort, but guard the result: if
+          # detection yields nothing, keep the runner's default Xcode rather than
+          # feeding an empty path to xcode-select. `swift build` later fails
+          # clearly if the selected toolchain is too old.
+          XCODE_APP="$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -vi beta | sort -V | tail -n 1 || true)"
+          if [ -n "$XCODE_APP" ] && [ -d "$XCODE_APP" ]; then
+            sudo xcode-select -s "$XCODE_APP"
+          fi
+          echo "Using $(xcode-select -p)"
           swift --version
 
       - name: Install Rust toolchain and Apple targets
