@@ -34,6 +34,24 @@ rustup target add --toolchain "$RUSTUP_TOOLCHAIN" \
   aarch64-apple-darwin \
   x86_64-apple-darwin >/dev/null
 
+# Expose upstream render types for the FFI.
+#
+# harmony_uniffi constructs openai-harmony's RenderConversationConfig and
+# RenderOptions directly, but upstream keeps them as `pub` structs inside a
+# private `mod encoding` and never re-exports them at the crate root. So they
+# can't be named by dependent crates even though the public render_conversation*
+# methods take them as parameters. Re-export them from the submodule before
+# building. Guarded (idempotent, and a no-op if upstream ever exposes them).
+HARMONY_LIB_RS="rust/openai-harmony/src/lib.rs"
+if [ -f "$HARMONY_LIB_RS" ] && ! grep -q "RenderConversationConfig" "$HARMONY_LIB_RS"; then
+  cat >> "$HARMONY_LIB_RS" <<'EOF'
+
+// Added by PicoHarmony's scripts/build_uniffi.sh: expose the render config /
+// options types that upstream leaves unreachable inside a private module.
+pub use encoding::{RenderConversationConfig, RenderOptions};
+EOF
+fi
+
 pushd "$CRATE" >/dev/null
 
 # 1) Host build (macOS) for bindgen input
