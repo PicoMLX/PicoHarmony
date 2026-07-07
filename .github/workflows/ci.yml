@@ -2,7 +2,8 @@
 # result can gate PRs. This links the committed
 # Binaries/harmony_uniffiFFI.xcframework — it does NOT rebuild the Rust FFI
 # (that lives in build-xcframework.yml and only runs on rust/** changes), so
-# no Rust toolchain and no submodule checkout are needed here.
+# no Rust toolchain is needed. The openai-harmony submodule IS checked out
+# because PicoHarmonyTests reads fixtures from its test-data/ directory.
 name: CI
 
 on:
@@ -19,8 +20,10 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v5
-        # The rust/openai-harmony submodule is only needed to regenerate the
-        # FFI. swift build/test consume the prebuilt XCFramework, so skip it.
+        with:
+          # swift build links the prebuilt XCFramework and needs no submodule,
+          # but swift test reads fixtures from rust/openai-harmony/test-data/.
+          submodules: recursive
 
       - name: Select Xcode
         run: |
