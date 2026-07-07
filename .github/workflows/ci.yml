@@ -1,0 +1,38 @@
+# Build + test on every commit on every branch, plus pull requests, so the
+# result can gate PRs. This links the committed
+# Binaries/harmony_uniffiFFI.xcframework — it does NOT rebuild the Rust FFI
+# (that lives in build-xcframework.yml and only runs on rust/** changes), so
+# no Rust toolchain and no submodule checkout are needed here.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & Test
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        # The rust/openai-harmony submodule is only needed to regenerate the
+        # FFI. swift build/test consume the prebuilt XCFramework, so skip it.
+
+      - name: Select Xcode
+        run: |
+          # Package.swift is swift-tools 6.2, which needs Xcode 26. The
+          # macos-26 image ships it as the default /Applications/Xcode.app.
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Show toolchain info
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
