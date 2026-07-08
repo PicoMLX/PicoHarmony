@@ -1,0 +1,43 @@
+# Warns when the pinned openai-harmony submodule is behind the upstream OpenAI
+# harmony repo's latest release. Cheap ubuntu job — it queries the GitHub API
+# and compares SHAs; it never checks out the submodule or rebuilds binaries.
+# When we're behind, it opens/refreshes a single tracking issue (label
+# `upstream-drift`); when we catch up, it closes that issue. See
+# scripts/check_upstream_harmony.sh for the logic.
+name: Check upstream harmony
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays at 07:00 UTC.
+    - cron: '0 7 * * 1'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: check-upstream-harmony
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Compare pinned openai-harmony against upstream latest release
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The tracking issue is repository-wide and represents the DEFAULT
+          # branch's pin. workflow_dispatch can be launched against any branch
+          # or tag, so always read the default branch's gitlink rather than the
+          # dispatched ref — otherwise a manual run on a feature branch that
+          # already bumped the submodule (or on an old tag) would open/close the
+          # shared issue based on the wrong pin. Scheduled runs already use the
+          # default branch; this makes manual runs behave the same.
+          ref: ${{ github.event.repository.default_branch }}
+          # No submodules: the pinned commit is read from HEAD's gitlink.
+
+      - name: Check upstream and report drift
+        run: ./scripts/check_upstream_harmony.sh

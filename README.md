@@ -235,12 +235,22 @@ swift test
 ./scripts/build_uniffi.sh
 ```
 
-You normally don't need a local Rust toolchain: pushing changes under
-`rust/**` or to `scripts/build_uniffi.sh` triggers the
+You normally don't need a local Rust toolchain. After changing anything under
+`rust/**` (including bumping the `rust/openai-harmony` submodule) or
+`scripts/build_uniffi.sh`, manually run the
 [Build XCFramework](.github/workflows/build-xcframework.yml) GitHub Actions
-workflow, which rebuilds `Binaries/harmony_uniffiFFI.xcframework` on a macOS
-runner, verifies `swift build` / `swift test` against the fresh binaries, and
-commits them back to the branch.
+workflow (**Actions → Build XCFramework → Run workflow**, targeting your branch).
+It rebuilds `Binaries/harmony_uniffiFFI.xcframework` on a macOS runner, verifies
+`swift build` / `swift test` against the fresh binaries, and commits them back to
+that branch.
+
+The rebuild is intentionally manual — run it before merging a Rust or submodule
+change, otherwise the committed binaries and generated Swift bindings can lag
+behind the sources (CI links the committed XCFramework and does not rebuild the
+FFI). A scheduled
+[Check upstream harmony](.github/workflows/check-upstream-harmony.yml) workflow
+also warns, via a tracking issue, when the pinned `openai-harmony` submodule
+falls behind the upstream OpenAI harmony release.
 
 ### Binary packaging
 
