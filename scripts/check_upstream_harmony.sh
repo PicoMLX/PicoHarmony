@@ -38,7 +38,7 @@ echo "Pinned $SUBMODULE_PATH commit: $pinned"
 # newest tag, then the default branch's HEAD.
 ref_kind=""
 ref_name=""
-if tag_name="$(gh api "repos/$UPSTREAM/releases/latest" --jq '.tag_name' 2>/dev/null)" && [ -n "$tag_name" ]; then
+if tag_name="$(gh api "repos/$UPSTREAM/releases/latest" --jq '.tag_name // empty' 2>/dev/null)" && [ -n "$tag_name" ]; then
   ref_kind="release"
   ref_name="$tag_name"
 elif tag_name="$(gh api "repos/$UPSTREAM/tags?per_page=1" --jq '.[0].name // empty' 2>/dev/null)" && [ -n "$tag_name" ]; then
@@ -46,12 +46,24 @@ elif tag_name="$(gh api "repos/$UPSTREAM/tags?per_page=1" --jq '.[0].name // emp
   ref_name="$tag_name"
 else
   ref_kind="branch"
-  ref_name="$(gh api "repos/$UPSTREAM" --jq '.default_branch')"
+  ref_name="$(gh api "repos/$UPSTREAM" --jq '.default_branch // empty')"
+fi
+
+# `// empty` above yields an empty string (never the literal "null") on a missing
+# field, so a failed resolution is caught here rather than silently comparing
+# against a bogus reference.
+if [ -z "$ref_name" ] || [ "$ref_name" = "null" ]; then
+  echo "::error::Could not resolve an upstream reference for '$UPSTREAM'."
+  exit 1
 fi
 
 # Dereference the reference to its commit SHA (handles annotated tags, since the
 # commits endpoint resolves the ref to the commit it ultimately points at).
-upstream_sha="$(gh api "repos/$UPSTREAM/commits/$ref_name" --jq '.sha')"
+upstream_sha="$(gh api "repos/$UPSTREAM/commits/$ref_name" --jq '.sha // empty')"
+if [ -z "$upstream_sha" ] || [ "$upstream_sha" = "null" ]; then
+  echo "::error::Could not resolve a commit SHA for '$UPSTREAM' $ref_kind '$ref_name'."
+  exit 1
+fi
 echo "Upstream latest ($ref_kind $ref_name): $upstream_sha"
 
 # A single reused tracking issue (matched by label). Ensure the label exists so
