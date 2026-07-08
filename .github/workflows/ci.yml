@@ -1,0 +1,41 @@
+# Build + test on every commit on every branch, plus pull requests, so the
+# result can gate PRs. This links the committed
+# Binaries/harmony_uniffiFFI.xcframework — it does NOT rebuild the Rust FFI
+# (that lives in build-xcframework.yml and only runs on rust/** changes), so
+# no Rust toolchain is needed. The openai-harmony submodule IS checked out
+# because PicoHarmonyTests reads fixtures from its test-data/ directory.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & Test
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # swift build links the prebuilt XCFramework and needs no submodule,
+          # but swift test reads fixtures from rust/openai-harmony/test-data/.
+          submodules: recursive
+
+      - name: Select Xcode
+        run: |
+          # Package.swift is swift-tools 6.2, which needs Xcode 26. The
+          # macos-26 image ships it as the default /Applications/Xcode.app.
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Show toolchain info
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
