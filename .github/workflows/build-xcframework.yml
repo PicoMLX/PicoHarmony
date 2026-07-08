@@ -1,17 +1,19 @@
-# Rebuilds Binaries/harmony_uniffiFFI.xcframework on a macOS runner whenever
-# the Rust sources or the packaging script change, verifies the Swift package
-# against the fresh binaries, and commits the result back to the triggering
-# branch. Pushes made with the default GITHUB_TOKEN do not trigger new
-# workflow runs, so the commit-back step cannot loop.
+# Rebuilds Binaries/harmony_uniffiFFI.xcframework on a macOS runner, verifies
+# the Swift package against the fresh binaries, and commits the result back to
+# the branch it was dispatched from.
+#
+# This runs on demand only (workflow_dispatch). The committed binaries depend
+# on the pinned `rust/openai-harmony` submodule commit, the `rust/harmony_uniffi`
+# wrapper crate, and the packaging script — all of which change deliberately and
+# infrequently (mostly when the upstream OpenAI harmony repo is updated). A
+# ~20-minute rebuild that force-commits binaries back to the branch is a poor
+# fit for an automatic push trigger, so trigger it by hand after bumping the
+# submodule or changing the wrapper/build script:
+#   Actions -> Build XCFramework -> Run workflow (pick the target branch).
 name: Build XCFramework
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'rust/**'
-      - 'scripts/build_uniffi.sh'
-      - '.github/workflows/build-xcframework.yml'
 
 permissions:
   contents: write
@@ -63,7 +65,11 @@ jobs:
       - name: Run tests
         run: swift test
 
+      # Commit-back only makes sense on a mutable branch. workflow_dispatch can
+      # also be run against a tag; skip the commit in that case rather than
+      # trying (and failing) to push onto an immutable tag ref.
       - name: Commit rebuilt binaries
+        if: github.ref_type == 'branch'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
