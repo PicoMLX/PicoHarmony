@@ -28,7 +28,16 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-        # No submodules: the pinned commit is read from HEAD's gitlink.
+        with:
+          # The tracking issue is repository-wide and represents the DEFAULT
+          # branch's pin. workflow_dispatch can be launched against any branch
+          # or tag, so always read the default branch's gitlink rather than the
+          # dispatched ref — otherwise a manual run on a feature branch that
+          # already bumped the submodule (or on an old tag) would open/close the
+          # shared issue based on the wrong pin. Scheduled runs already use the
+          # default branch; this makes manual runs behave the same.
+          ref: ${{ github.event.repository.default_branch }}
+          # No submodules: the pinned commit is read from HEAD's gitlink.
 
       - name: Check upstream and report drift
         run: ./scripts/check_upstream_harmony.sh

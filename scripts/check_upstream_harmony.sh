@@ -73,18 +73,33 @@ gh label create "$ISSUE_LABEL" \
   --description "Pinned openai-harmony is behind upstream" >/dev/null 2>&1 || true
 existing="$(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[0].number // empty')"
 
-if [ "$pinned" = "$upstream_sha" ]; then
-  echo "Up to date with upstream $ref_kind $ref_name."
-  if [ -n "$existing" ]; then
-    gh issue close "$existing" \
-      --comment "Pinned openai-harmony now matches upstream $ref_kind \`$ref_name\` ($upstream_sha). Closing automatically."
-    echo "Closed stale tracking issue #$existing."
-  fi
-  exit 0
+# Compare our pinned commit against the upstream reference by ancestry, not raw
+# SHA equality: the pin can legitimately sit *ahead* of the latest release (a
+# commit past the tag), which is still up to date and must not be reported as
+# drift. GitHub's compare (base...head) reports head's relationship to base:
+#   identical / ahead  -> pinned already contains the release  => up to date
+#   behind   / diverged -> pinned is missing upstream commits  => behind
+status="$(gh api "repos/$UPSTREAM/compare/${ref_name}...${pinned}" --jq '.status // empty')"
+if [ -z "$status" ]; then
+  echo "::error::Could not compare '$pinned' against '$UPSTREAM' $ref_kind '$ref_name'."
+  exit 1
 fi
+echo "Pin is '$status' relative to $ref_kind $ref_name."
 
-# We differ from upstream's latest release/tag, so we're (almost certainly)
-# behind. Emit a warning annotation and open/refresh the tracking issue.
+case "$status" in
+  identical | ahead)
+    echo "Up to date with upstream $ref_kind $ref_name (pin contains the release)."
+    if [ -n "$existing" ]; then
+      gh issue close "$existing" \
+        --comment "Pinned openai-harmony now contains upstream $ref_kind \`$ref_name\` ($upstream_sha). Closing automatically."
+      echo "Closed stale tracking issue #$existing."
+    fi
+    exit 0
+    ;;
+esac
+
+# status is behind or diverged: we're missing upstream commits. Emit a warning
+# annotation and open/refresh the tracking issue.
 compare_url="https://github.com/$UPSTREAM/compare/${pinned}...${ref_name}"
 echo "::warning::Pinned openai-harmony ($pinned) is behind upstream $ref_kind $ref_name ($upstream_sha)."
 
