@@ -169,13 +169,17 @@ make_framework() {
   cp "$dylib_path" "$bin_path"
 
   # Set the framework-relative install name so the embedding app loads it via
-  # @rpath, extract a matching dSYM, then strip debug info from the shipped
-  # binary (keeping exported UniFFI symbols so it still links and loads). None
-  # of install_name_tool / dsymutil / strip change the Mach-O LC_UUID, so the
-  # dSYM stays matched to the stripped binary.
+  # @rpath, extract a matching dSYM, then strip the shipped binary down to its
+  # exported UniFFI globals (strip -x). install_name_tool and strip invalidate
+  # the linker's ad-hoc code signature, and on Apple Silicon a dylib with a
+  # broken/absent signature is killed on load (code-signature violation), so
+  # re-sign ad-hoc afterwards. None of these steps change the Mach-O LC_UUID, so
+  # the dSYM stays matched; Xcode re-signs the framework with the app's identity
+  # when it embeds it.
   install_name_tool -id "$install_name" "$bin_path"
   dsymutil "$bin_path" -o "$dsym"
-  strip -S "$bin_path"
+  strip -x "$bin_path"
+  codesign --force --sign - "$bin_path"
 
   cp build/uniffi/Headers/* "$hdr_dir/"
 
