@@ -22,7 +22,12 @@ OUT_XC="Binaries/harmony_uniffiFFI.xcframework"
 OUT_SWIFT="Sources/PicoHarmonyGenerated"
 
 LIB_NAME="libharmony_uniffi.a"
+DYLIB_NAME="libharmony_uniffi.dylib"
 FRAMEWORK_NAME="harmony_uniffiFFI"
+
+# Absolute repo root: `xcodebuild -create-xcframework -debug-symbols` needs
+# absolute dSYM paths, and it runs after we popd back here from $CRATE.
+ROOT="$(pwd)"
 
 mkdir -p Binaries "$OUT_SWIFT"
 
@@ -72,7 +77,7 @@ HOST_LIB="target/release/${LIB_NAME}"
 rm -rf "$OUT_SWIFT" build/uniffi build/fat build/frameworks
 mkdir -p \
   build/uniffi/Headers \
-  build/fat/ios-sim build/fat/macos \
+  build/fat/ios build/fat/ios-sim build/fat/macos \
   "$OUT_SWIFT"
 
 # Swift sources
@@ -90,40 +95,52 @@ rustup run "$RUSTUP_TOOLCHAIN" cargo build --release --target x86_64-apple-ios
 rustup run "$RUSTUP_TOOLCHAIN" cargo build --release --target aarch64-apple-darwin
 rustup run "$RUSTUP_TOOLCHAIN" cargo build --release --target x86_64-apple-darwin
 
-IOS_LIB="target/aarch64-apple-ios/release/${LIB_NAME}"
+# We ship the cdylib (dynamic library) as the framework binary - not the static
+# archive - so the embedded framework is a genuine Mach-O image that code-signs,
+# notarizes, and carries an LC_UUID we can match a dSYM to. The crate builds both
+# (crate-type = ["staticlib", "cdylib"]); the static .a is used only as bindgen
+# input above.
+IOS_DYLIB="target/aarch64-apple-ios/release/${DYLIB_NAME}"
 
-SIM_ARM_LIB="target/aarch64-apple-ios-sim/release/${LIB_NAME}"
-SIM_X64_LIB="target/x86_64-apple-ios/release/${LIB_NAME}"
+SIM_ARM_DYLIB="target/aarch64-apple-ios-sim/release/${DYLIB_NAME}"
+SIM_X64_DYLIB="target/x86_64-apple-ios/release/${DYLIB_NAME}"
 
-MAC_ARM_LIB="target/aarch64-apple-darwin/release/${LIB_NAME}"
-MAC_X64_LIB="target/x86_64-apple-darwin/release/${LIB_NAME}"
+MAC_ARM_DYLIB="target/aarch64-apple-darwin/release/${DYLIB_NAME}"
+MAC_X64_DYLIB="target/x86_64-apple-darwin/release/${DYLIB_NAME}"
 
-SIM_FAT_LIB="build/fat/ios-sim/${LIB_NAME}"
-MAC_FAT_LIB="build/fat/macos/${LIB_NAME}"
+IOS_FAT_DYLIB="build/fat/ios/${DYLIB_NAME}"
+SIM_FAT_DYLIB="build/fat/ios-sim/${DYLIB_NAME}"
+MAC_FAT_DYLIB="build/fat/macos/${DYLIB_NAME}"
 
-# 4) Create fat libs for simulator + macOS
-lipo -create "$SIM_ARM_LIB" "$SIM_X64_LIB" -output "$SIM_FAT_LIB"
-lipo -create "$MAC_ARM_LIB" "$MAC_X64_LIB" -output "$MAC_FAT_LIB"
+# 4) Assemble per-destination dylibs. iOS device is single-arch; the simulator
+# and macOS slices are universal (arm64 + x86_64).
+cp "$IOS_DYLIB" "$IOS_FAT_DYLIB"
+lipo -create "$SIM_ARM_DYLIB" "$SIM_X64_DYLIB" -output "$SIM_FAT_DYLIB"
+lipo -create "$MAC_ARM_DYLIB" "$MAC_X64_DYLIB" -output "$MAC_FAT_DYLIB"
 
-# 5) Assemble a static framework bundle per slice.
+# 5) Assemble a dynamic framework bundle (+ dSYM) per slice.
 #
 # Framework-bundle slices keep module.modulemap inside the bundle
-# (Modules/module.modulemap). Bare -library/-headers slices instead ship a
-# root Headers/module.modulemap that Xcode stages into the shared
-# Build/Products/<config>/include/, which collides with any other static-lib
-# XCFramework in the same build (e.g. chroma-swift's chroma_swiftFFI) and
-# fails with "Multiple commands produce .../include/module.modulemap".
-# The framework binary is still the static archive, so linking semantics are
-# unchanged and nothing is embedded at runtime.
+# (Modules/module.modulemap), so nothing is staged into the shared
+# Build/Products/<config>/include/ - this is what avoids the "Multiple commands
+# produce .../include/module.modulemap" collision with other static-lib
+# XCFrameworks in the same build (e.g. chroma-swift's chroma_swiftFFI).
+#
+# The binary is the cdylib (a real Mach-O dynamic library), so the embedded
+# framework code-signs and notarizes normally and has an LC_UUID we can match a
+# dSYM to. Per slice we set the framework install name, extract a .dSYM with
+# dsymutil, then strip debug info from the shipped binary (keeping the exported
+# UniFFI symbols) so the slice stays small and the DWARF ships in the dSYM.
 make_framework() {
-  local lib_path="$1"    # static archive for this slice
+  local dylib_path="$1"  # cdylib (dynamic library) for this slice
   local slice_dir="$2"   # output directory for this slice
   local min_os_key="$3"  # MinimumOSVersion (iOS) or LSMinimumSystemVersion (macOS)
   local min_os_ver="$4"
   local platform="$5"    # CFBundleSupportedPlatforms value: iPhoneOS / iPhoneSimulator / MacOSX
 
   local fw="$slice_dir/${FRAMEWORK_NAME}.framework"
-  rm -rf "$fw"
+  local dsym="$slice_dir/${FRAMEWORK_NAME}.framework.dSYM"
+  rm -rf "$fw" "$dsym"
 
   # macOS frameworks require the versioned ("deep") bundle layout: the binary,
   # Headers, Modules and Resources/Info.plist live under Versions/A, with
@@ -132,22 +149,34 @@ make_framework() {
   # shallow layout for macOS makes an embedding app fail to build with "contains
   # Info.plist, expected Versions/Current/Resources/Info.plist since the platform
   # does not use shallow bundles".
-  local hdr_dir mod_dir plist_path bin_path
+  local hdr_dir mod_dir plist_path bin_path install_name
   if [ "$platform" = "MacOSX" ]; then
     mkdir -p "$fw/Versions/A/Headers" "$fw/Versions/A/Modules" "$fw/Versions/A/Resources"
     hdr_dir="$fw/Versions/A/Headers"
     mod_dir="$fw/Versions/A/Modules"
     plist_path="$fw/Versions/A/Resources/Info.plist"
     bin_path="$fw/Versions/A/${FRAMEWORK_NAME}"
+    install_name="@rpath/${FRAMEWORK_NAME}.framework/Versions/A/${FRAMEWORK_NAME}"
   else
     mkdir -p "$fw/Headers" "$fw/Modules"
     hdr_dir="$fw/Headers"
     mod_dir="$fw/Modules"
     plist_path="$fw/Info.plist"
     bin_path="$fw/${FRAMEWORK_NAME}"
+    install_name="@rpath/${FRAMEWORK_NAME}.framework/${FRAMEWORK_NAME}"
   fi
 
-  cp "$lib_path" "$bin_path"
+  cp "$dylib_path" "$bin_path"
+
+  # Set the framework-relative install name so the embedding app loads it via
+  # @rpath, extract a matching dSYM, then strip debug info from the shipped
+  # binary (keeping exported UniFFI symbols so it still links and loads). None
+  # of install_name_tool / dsymutil / strip change the Mach-O LC_UUID, so the
+  # dSYM stays matched to the stripped binary.
+  install_name_tool -id "$install_name" "$bin_path"
+  dsymutil "$bin_path" -o "$dsym"
+  strip -S "$bin_path"
+
   cp build/uniffi/Headers/* "$hdr_dir/"
 
   cat > "$mod_dir/module.modulemap" <<EOF
@@ -196,18 +225,23 @@ EOF
   fi
 }
 
-make_framework "$IOS_LIB"     build/frameworks/ios     MinimumOSVersion       "$IOS_DEPLOYMENT_TARGET"   iPhoneOS
-make_framework "$SIM_FAT_LIB" build/frameworks/ios-sim MinimumOSVersion       "$IOS_DEPLOYMENT_TARGET"   iPhoneSimulator
-make_framework "$MAC_FAT_LIB" build/frameworks/macos   LSMinimumSystemVersion "$MACOS_DEPLOYMENT_TARGET" MacOSX
+make_framework "$IOS_FAT_DYLIB" build/frameworks/ios     MinimumOSVersion       "$IOS_DEPLOYMENT_TARGET"   iPhoneOS
+make_framework "$SIM_FAT_DYLIB" build/frameworks/ios-sim MinimumOSVersion       "$IOS_DEPLOYMENT_TARGET"   iPhoneSimulator
+make_framework "$MAC_FAT_DYLIB" build/frameworks/macos   LSMinimumSystemVersion "$MACOS_DEPLOYMENT_TARGET" MacOSX
 
 popd >/dev/null
 
-# 6) Create XCFramework with iOS + iOS-sim + macOS framework slices
+# 6) Create XCFramework with iOS + iOS-sim + macOS framework slices, bundling
+# each slice's dSYM so App Store Connect can symbolicate (and stops warning
+# about missing symbols). -debug-symbols requires absolute paths.
 rm -rf "$OUT_XC"
 xcodebuild -create-xcframework \
   -framework "$CRATE/build/frameworks/ios/${FRAMEWORK_NAME}.framework" \
+  -debug-symbols "$ROOT/$CRATE/build/frameworks/ios/${FRAMEWORK_NAME}.framework.dSYM" \
   -framework "$CRATE/build/frameworks/ios-sim/${FRAMEWORK_NAME}.framework" \
+  -debug-symbols "$ROOT/$CRATE/build/frameworks/ios-sim/${FRAMEWORK_NAME}.framework.dSYM" \
   -framework "$CRATE/build/frameworks/macos/${FRAMEWORK_NAME}.framework" \
+  -debug-symbols "$ROOT/$CRATE/build/frameworks/macos/${FRAMEWORK_NAME}.framework.dSYM" \
   -output "$OUT_XC"
 
 echo "✅ Generated:"

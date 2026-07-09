@@ -12,14 +12,21 @@ uniffi = { version = "0.30.0", features = ["cli"] }
 thiserror = "1"
 serde_json = "1"
 
-# Optimize the release build for size. The prebuilt macOS/iOS-sim static
-# archives sit right at GitHub's 100 MB per-file limit; whole-program LTO plus
-# size-focused codegen trims dead code across the whole dependency tree (incl.
+# Optimize the release build for size. The prebuilt macOS/iOS-sim slices sit
+# near GitHub's 100 MB per-file limit; whole-program LTO plus size-focused
+# codegen trims dead code across the whole dependency tree (incl.
 # openai-harmony's `image` codecs) so the slices stay under the limit. This
-# changes only size vs. speed — no functionality is removed. `strip` is left at
-# "debuginfo" (not "symbols") so the FFI's exported symbols remain linkable.
+# changes only size vs. speed — no functionality is removed.
+#
+# We emit line-table debug info (`debug = 1`) and do NOT strip at the cargo
+# level: scripts/build_uniffi.sh runs `dsymutil` to extract a .dSYM from each
+# framework slice, then strips the shipped dylib itself (`strip -S`, keeping the
+# exported UniFFI symbols). That gives App Store Connect a dSYM whose UUID
+# matches the embedded framework binary — silencing the "Upload Symbols Failed"
+# warning — while the DWARF lives in the separate dSYM rather than in the slice.
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
-strip = "debuginfo"
+debug = 1
+strip = false
