@@ -124,19 +124,40 @@ make_framework() {
 
   local fw="$slice_dir/${FRAMEWORK_NAME}.framework"
   rm -rf "$fw"
-  mkdir -p "$fw/Headers" "$fw/Modules"
 
-  cp "$lib_path" "$fw/${FRAMEWORK_NAME}"
-  cp build/uniffi/Headers/* "$fw/Headers/"
+  # macOS frameworks require the versioned ("deep") bundle layout: the binary,
+  # Headers, Modules and Resources/Info.plist live under Versions/A, with
+  # top-level symlinks into Versions/Current (added after the files are written,
+  # below). iOS and the simulator use the flat ("shallow") layout. Shipping the
+  # shallow layout for macOS makes an embedding app fail to build with "contains
+  # Info.plist, expected Versions/Current/Resources/Info.plist since the platform
+  # does not use shallow bundles".
+  local hdr_dir mod_dir plist_path bin_path
+  if [ "$platform" = "MacOSX" ]; then
+    mkdir -p "$fw/Versions/A/Headers" "$fw/Versions/A/Modules" "$fw/Versions/A/Resources"
+    hdr_dir="$fw/Versions/A/Headers"
+    mod_dir="$fw/Versions/A/Modules"
+    plist_path="$fw/Versions/A/Resources/Info.plist"
+    bin_path="$fw/Versions/A/${FRAMEWORK_NAME}"
+  else
+    mkdir -p "$fw/Headers" "$fw/Modules"
+    hdr_dir="$fw/Headers"
+    mod_dir="$fw/Modules"
+    plist_path="$fw/Info.plist"
+    bin_path="$fw/${FRAMEWORK_NAME}"
+  fi
 
-  cat > "$fw/Modules/module.modulemap" <<EOF
+  cp "$lib_path" "$bin_path"
+  cp build/uniffi/Headers/* "$hdr_dir/"
+
+  cat > "$mod_dir/module.modulemap" <<EOF
 framework module ${FRAMEWORK_NAME} {
   umbrella header "${FRAMEWORK_NAME}.h"
   export *
 }
 EOF
 
-  cat > "$fw/Info.plist" <<EOF
+  cat > "$plist_path" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -162,6 +183,17 @@ EOF
 </dict>
 </plist>
 EOF
+
+  # macOS: create the version symlink (Current -> A) and the top-level symlinks
+  # into it that make this a valid versioned framework bundle. iOS/simulator
+  # slices are flat and need none of this.
+  if [ "$platform" = "MacOSX" ]; then
+    ln -s A                                    "$fw/Versions/Current"
+    ln -s "Versions/Current/${FRAMEWORK_NAME}" "$fw/${FRAMEWORK_NAME}"
+    ln -s Versions/Current/Headers             "$fw/Headers"
+    ln -s Versions/Current/Modules             "$fw/Modules"
+    ln -s Versions/Current/Resources           "$fw/Resources"
+  fi
 }
 
 make_framework "$IOS_LIB"     build/frameworks/ios     MinimumOSVersion       "$IOS_DEPLOYMENT_TARGET"   iPhoneOS

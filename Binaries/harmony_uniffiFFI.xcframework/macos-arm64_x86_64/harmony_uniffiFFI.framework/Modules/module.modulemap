@@ -1,4 +1,0 @@
-framework module harmony_uniffiFFI {
-  umbrella header "harmony_uniffiFFI.h"
-  export *
-}
