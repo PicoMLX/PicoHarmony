@@ -14,6 +14,9 @@ name: Build XCFramework
 
 on:
   workflow_dispatch:
+  # TEMPORARY: build on push to this experiment branch (removed before merge).
+  push:
+    branches: [ "claude/macos-framework-deep-bundle" ]
 
 permissions:
   contents: write

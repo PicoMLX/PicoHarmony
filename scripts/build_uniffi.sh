@@ -24,6 +24,10 @@ OUT_SWIFT="Sources/PicoHarmonyGenerated"
 LIB_NAME="libharmony_uniffi.a"
 DYLIB_NAME="libharmony_uniffi.dylib"
 FRAMEWORK_NAME="harmony_uniffiFFI"
+# Must equal the framework's CFBundleIdentifier (below). App Store upload
+# rejects a framework whose code-signature identifier doesn't match its bundle
+# id (error 90334), so we sign the binary with this identifier explicitly.
+BUNDLE_ID="com.picomlx.harmony-uniffi-ffi"
 
 # Absolute repo root: `xcodebuild -create-xcframework -debug-symbols` needs
 # absolute dSYM paths, and it runs after we popd back here from $CRATE.
@@ -179,7 +183,11 @@ make_framework() {
   install_name_tool -id "$install_name" "$bin_path"
   dsymutil "$bin_path" -o "$dsym"
   strip -x "$bin_path"
-  codesign --force --sign - "$bin_path"
+  # Ad-hoc sign with the identifier pinned to the bundle id. codesign otherwise
+  # derives the identifier from the file name ("harmony_uniffiFFI-<hash>"), which
+  # Xcode preserves when it re-signs on embed - and App Store upload then rejects
+  # it because it doesn't match CFBundleIdentifier (error 90334).
+  codesign --force --sign - --identifier "$BUNDLE_ID" "$bin_path"
 
   cp build/uniffi/Headers/* "$hdr_dir/"
 
@@ -198,7 +206,7 @@ EOF
 	<key>CFBundleExecutable</key>
 	<string>${FRAMEWORK_NAME}</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.picomlx.harmony-uniffi-ffi</string>
+	<string>${BUNDLE_ID}</string>
 	<key>CFBundleName</key>
 	<string>${FRAMEWORK_NAME}</string>
 	<key>CFBundlePackageType</key>
